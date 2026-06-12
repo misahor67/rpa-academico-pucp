@@ -1,0 +1,17 @@
+# Dependencias
+node_modules/
+.venv/
+
+# Variables de entorno
+.env
+.env.local
+.env.production
+
+# Credenciales — NUNCA subir
+credentials.json
+token.json
+
+# Archivos generados
+__pycache__/
+*.pyc
+.next/

@@ -1,0 +1,22 @@
+token.json
+.venv/
+__pycache__/
+*.pyc
+.env
+cronogramas_paideia/
+eventos_paideia_json/
+ics/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Credenciales Google — NUNCA subir
+credentials.json
+token.json
+
+# Archivos generados por el RPA
+cronogramas_paideia/
+eventos_paideia_json/
+ics/
