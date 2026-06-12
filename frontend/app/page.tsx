@@ -1,70 +1,68 @@
-import { Settings } from "lucide-react"
-import { Button } from "@/components/ui/button"
+// frontend/app/page.tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { verificarBackend } from "@/lib/api";
 
 export default function Home() {
+  const router = useRouter();
+  const [backendActivo, setBackendActivo] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    verificarBackend().then(setBackendActivo);
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#F9FAFB]">
       {/* Navbar */}
-      <nav className="h-16 bg-[#111827] flex items-center justify-between px-6">
-        <span className="text-white font-semibold text-lg">RPA Académico PUCP</span>
-        <button className="text-white hover:text-gray-300 transition-colors">
-          <Settings className="h-5 w-5" />
-        </button>
+      <nav className="bg-[#111827] h-16 flex items-center justify-between px-8">
+        <span className="text-white font-semibold text-lg">
+          RPA Académico PUCP
+        </span>
+        <div className="flex items-center gap-3">
+          {backendActivo === null && (
+            <span className="text-gray-400 text-sm">Verificando...</span>
+          )}
+          {backendActivo === true && (
+            <span className="text-green-400 text-sm">● Sistema activo</span>
+          )}
+          {backendActivo === false && (
+            <span className="text-red-400 text-sm">● Backend desconectado</span>
+          )}
+        </div>
       </nav>
 
-      {/* Main Content */}
-      <main className="flex flex-col items-center justify-center px-4 py-16">
-        {/* Hero Section */}
-        <div className="text-center max-w-xl mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4 text-balance">
+      {/* Contenido principal */}
+      <main className="flex flex-col items-center justify-center min-h-[calc(100vh-64px)] gap-8 px-4">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-[#111827] mb-3">
             Centraliza tu vida académica
           </h1>
-          <p className="text-gray-500 text-lg mb-8">
-            Sincroniza automáticamente Campus Virtual y PAIDEIA con tu Google Calendar. Sin esfuerzo manual.
+          <p className="text-[#6B7280] text-base max-w-md">
+            Sincroniza automáticamente Campus Virtual y PAIDEIA con tu Google
+            Calendar. Sin esfuerzo manual.
           </p>
-          <Button className="bg-[#2563EB] hover:bg-[#1d4ed8] text-white px-6 py-2.5 text-base font-medium">
-            Iniciar sincronización
-          </Button>
         </div>
 
-        {/* Status Card */}
-        <div className="w-full max-w-[420px] bg-white border border-gray-200 rounded-xl shadow-sm p-6">
-          {/* Last Sync */}
-          <div className="mb-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Última sincronización</p>
-            <p className="text-gray-900 font-medium">24 de mayo, 2025 — 10:32 am</p>
-          </div>
+        <button
+          onClick={() => router.push("/configuracion")}
+          className="bg-[#2563EB] text-white px-8 py-3 rounded-lg font-semibold hover:bg-[#1D4ED8] transition-colors"
+        >
+          Iniciar sincronización
+        </button>
 
-          {/* Ciclo */}
-          <div className="flex items-center gap-2 mb-6">
-            <span className="text-gray-500">Ciclo:</span>
-            <span className="text-gray-900 font-medium">Regular 2 — 2025</span>
-          </div>
-
-          {/* Events Count */}
-          <div className="text-center mb-6">
-            <p className="text-5xl font-bold text-[#2563EB]">54</p>
-            <p className="text-gray-500 text-sm mt-1">Eventos insertados</p>
-          </div>
-
-          {/* Badges */}
-          <div className="flex justify-center gap-2 mb-6">
-            <span className="px-3 py-1 bg-blue-100 text-[#2563EB] text-sm font-medium rounded-full">
-              Campus Virtual
-            </span>
-            <span className="px-3 py-1 bg-blue-100 text-[#2563EB] text-sm font-medium rounded-full">
-              PAIDEIA
-            </span>
-          </div>
-
-          {/* History Link */}
-          <div className="text-center">
-            <a href="#" className="text-[#2563EB] text-sm hover:underline">
-              Ver historial
-            </a>
-          </div>
+        {/* Tarjeta de estado */}
+        <div className="bg-white border border-[#D1D5DB] rounded-xl shadow-sm p-6 w-full max-w-md">
+          <p className="text-xs text-[#6B7280] mb-1">Última sincronización</p>
+          <p className="text-[#111827] font-medium mb-3">
+            Sin sincronizaciones previas
+          </p>
+          <p className="text-sm text-[#6B7280]">
+            Inicia tu primera sincronización para ver el historial aquí.
+          </p>
         </div>
       </main>
     </div>
-  )
+  );
 }
