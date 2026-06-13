@@ -140,14 +140,23 @@ def ejecutar_rpa(sesion_id: str, config: dict):
 
         # Esperar hasta que el usuario confirme desde P8
         import time as time_module
+        log(sesion_id, "Esperando confirmación del usuario...")
         timeout = 300  # 5 minutos para confirmar
         elapsed = 0
+        confirmado = False
         while elapsed < timeout:
+            time_module.sleep(1)
+            elapsed += 1
             sesion = sesiones.get(sesion_id, {})
-            if sesion.get("nombre_calendario") and sesion.get("confirmado"):
+            if sesion.get("confirmado") is True:
+                confirmado = True
                 break
-            time_module.sleep(2)
-            elapsed += 2
+
+        if not confirmado:
+            actualizar_sesion(sesion_id,
+                estado="error",
+                mensaje="Tiempo de espera agotado. El usuario no confirmó la sincronización.")
+            return
 
         nombre_cal = sesiones[sesion_id].get(
             "nombre_calendario", f"RPA Académico — {sesion_id[:8]}")
@@ -266,12 +275,14 @@ def obtener_eventos(sesion_id: str):
         "eventos": sesiones[sesion_id].get("eventos", [])
     }
 
+class ConfirmacionBody(BaseModel):
+    nombre_calendario: str
+
 @app.post("/sincronizacion/{sesion_id}/confirmar")
-def confirmar_sincronizacion(sesion_id: str, body: dict):
-    """El usuario confirma la inserción con el nombre del calendario."""
+def confirmar_sincronizacion(sesion_id: str, body: ConfirmacionBody):
     if sesion_id not in sesiones:
         return {"error": "Sesión no encontrada"}
-    sesiones[sesion_id]["nombre_calendario"] = body.get(
-        "nombre_calendario", "RPA Académico PUCP")
+    sesiones[sesion_id]["nombre_calendario"] = body.nombre_calendario
     sesiones[sesion_id]["confirmado"] = True
-    return {"ok": True}
+    log(sesion_id, f"Usuario confirmó con calendario: {body.nombre_calendario}")
+    return {"ok": True, "nombre_calendario": body.nombre_calendario}
