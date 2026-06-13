@@ -10,6 +10,11 @@ function ResultadoPage() {
   const searchParams = useSearchParams();
   const sesionId = searchParams.get("sesion");
   const [totalEventos, setTotalEventos] = useState(54);
+  const [fechaHora, setFechaHora] = useState("");
+
+  useEffect(() => {
+    setFechaHora(new Date().toLocaleString("es-PE"));
+  }, []);
 
   useEffect(() => {
     if (!sesionId) {
@@ -67,7 +72,7 @@ function ResultadoPage() {
         <div className="grid grid-cols-2 gap-4 w-full">
           {[
             { label: "Ciclo sincronizado", valor: "Regular 2 - 2025" },
-            { label: "Fecha y hora", valor: new Date().toLocaleString("es-PE") },
+            { label: "Fecha y hora", valor: fechaHora || "Cargando..." },
           ].map((m, i) => (
             <div key={i} className="bg-white border border-[#D1D5DB] rounded-xl p-5">
               <p className="text-xs text-[#6B7280] mb-1">{m.label}</p>
