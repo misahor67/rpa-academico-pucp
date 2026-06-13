@@ -37,25 +37,34 @@ function ProgresoCampusPage() {
   ]);
 
   useEffect(() => {
-    if (!sesionId) {
-      router.push("/");
-      return;
-    }
-
-    const intervalo = setInterval(async () => {
-      try {
-        const estado = await obtenerEstado(sesionId);
-        if (estado.estado === "completado") {
-          clearInterval(intervalo);
-          router.push(`/resultado?sesion=${sesionId}`);
-        }
-      } catch {
-        console.error("Error al obtener estado");
+      if (!sesionId) {
+        router.push("/");
+        return;
       }
-    }, 3000);
 
-    return () => clearInterval(intervalo);
-  }, [sesionId, router]);
+      const intervalo = setInterval(async () => {
+        try {
+          const estado = await obtenerEstado(sesionId);
+
+          console.log("Estado actual:", estado.estado);
+
+          if (estado.estado === "extrayendo_paideia" ||
+              estado.estado === "esperando_login_paideia") {
+            clearInterval(intervalo);
+            router.push(`/progreso-paideia?sesion=${sesionId}`);
+          }
+          if (estado.estado === "sincronizando" ||
+              estado.estado === "completado") {
+            clearInterval(intervalo);
+            router.push(`/resultado?sesion=${sesionId}`);
+          }
+        } catch {
+          console.error("Error al obtener estado");
+        }
+      }, 1500);
+
+      return () => clearInterval(intervalo);
+    }, [sesionId, router]);
 
   const iconoEstado = (estado: EstadoMes) => {
     if (estado === "completado") return (

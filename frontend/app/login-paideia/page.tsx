@@ -12,23 +12,30 @@ function LoginPaideiaPage() {
   const [mensaje, setMensaje] = useState("Detectando sesión...");
 
   useEffect(() => {
-    if (!sesionId) {
-      router.push("/");
-      return;
-    }
+    if (!sesionId) { router.push("/"); return; }
 
     const intervalo = setInterval(async () => {
       try {
         const estado = await obtenerEstado(sesionId);
-        setMensaje(estado.mensaje);
-        if (estado.estado === "extrayendo") {
+        console.log("Estado P6:", estado.estado);
+
+        if (estado.estado === "esperando_confirmacion") {
           clearInterval(intervalo);
-          router.push(`/progreso-paideia?sesion=${sesionId}`);
+          router.push(`/confirmacion?sesion=${sesionId}`);
+        }
+        if (estado.estado === "sincronizando" ||
+            estado.estado === "completado") {
+          clearInterval(intervalo);
+          router.push(`/resultado?sesion=${sesionId}`);
+        }
+        if (estado.estado === "error") {
+          clearInterval(intervalo);
+          router.push(`/resultado?sesion=${sesionId}`);
         }
       } catch {
-        setMensaje("Error al conectar con el servidor.");
+        console.error("Error al obtener estado");
       }
-    }, 3000);
+    }, 1500);
 
     return () => clearInterval(intervalo);
   }, [sesionId, router]);

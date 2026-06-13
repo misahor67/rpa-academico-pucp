@@ -130,16 +130,63 @@ def ejecutar_rpa(sesion_id: str, config: dict):
                 mensaje=f"{len(eventos_paideia)} entregas extraídas de PAIDEIA")
             log(sesion_id, f"PAIDEIA: {len(eventos_paideia)} eventos")
 
-        # ── Google Calendar ───────────────────────────────────────────────────
+        # ── Google Calendar ───────────────────────────────────────────────
+        actualizar_sesion(sesion_id,
+            estado="esperando_confirmacion",
+            mensaje="Extracción completada. Esperando confirmación del usuario...",
+            progreso=82,
+            total_campus=len(eventos_campus),
+            total_paideia=len(eventos_paideia))
+
+        # Esperar hasta que el usuario confirme desde P8
+        import time as time_module
+        timeout = 300  # 5 minutos para confirmar
+        elapsed = 0
+        while elapsed < timeout:
+            sesion = sesiones.get(sesion_id, {})
+            if sesion.get("nombre_calendario") and sesion.get("confirmado"):
+                break
+            time_module.sleep(2)
+            elapsed += 2
+
+        nombre_cal = sesiones[sesion_id].get(
+            "nombre_calendario", f"RPA Académico — {sesion_id[:8]}")
+
         actualizar_sesion(sesion_id,
             estado="sincronizando",
-            mensaje="Sincronizando con Google Calendar...",
+            mensaje="Creando calendario en Google Calendar...",
             progreso=85)
 
-        eventos_finales = resolver_conflictos(eventos_campus, eventos_paideia)
+        # Crear calendario y obtener su ID
         creds = get_credentials()
-        limpiar_calendario(creds, calendar_id=CALENDAR_ID)
-        insertar_eventos(creds, eventos_finales, calendar_id=CALENDAR_ID)
+        from googleapiclient.discovery import build
+        service = build("calendar", "v3", credentials=creds)
+
+        calendario_nuevo = service.calendars().insert(body={
+            "summary": nombre_cal,
+            "timeZone": "America/Lima"
+        }).execute()
+
+        nuevo_calendar_id = calendario_nuevo["id"]
+        log(sesion_id, f"Calendario creado: {nombre_cal} ({nuevo_calendar_id})")
+
+        actualizar_sesion(sesion_id,
+            estado="sincronizando",
+            mensaje="Insertando eventos en Google Calendar...",
+            progreso=90)
+
+        eventos_finales = resolver_conflictos(eventos_campus, eventos_paideia)
+        insertar_eventos(creds, eventos_finales, calendar_id=nuevo_calendar_id)
+
+        actualizar_sesion(sesion_id,
+            estado="completado",
+            mensaje="Sincronización completada exitosamente",
+            progreso=100,
+            eventos=eventos_finales,
+            total_campus=len(eventos_campus),
+            total_paideia=len(eventos_paideia),
+            nombre_calendario=nombre_cal,
+            calendar_id=nuevo_calendar_id)
 
         actualizar_sesion(sesion_id,
             estado="completado",
@@ -218,3 +265,13 @@ def obtener_eventos(sesion_id: str):
         "total_paideia": sesiones[sesion_id].get("total_paideia", 0),
         "eventos": sesiones[sesion_id].get("eventos", [])
     }
+
+@app.post("/sincronizacion/{sesion_id}/confirmar")
+def confirmar_sincronizacion(sesion_id: str, body: dict):
+    """El usuario confirma la inserción con el nombre del calendario."""
+    if sesion_id not in sesiones:
+        return {"error": "Sesión no encontrada"}
+    sesiones[sesion_id]["nombre_calendario"] = body.get(
+        "nombre_calendario", "RPA Académico PUCP")
+    sesiones[sesion_id]["confirmado"] = True
+    return {"ok": True}

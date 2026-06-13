@@ -15,6 +15,17 @@ export interface EstadoSesion {
   mensaje: string;
   progreso: number;
   eventos: any[];
+  total_campus: number;
+  total_paideia: number;
+  nombre_calendario?: string;
+  calendar_id?: string;
+  config?: {
+    ciclo: number;
+    anio: number;
+    campus: boolean;
+    paideia: boolean;
+  };
+  logs?: string[];
 }
 
 // Inicia una nueva sincronización
@@ -50,4 +61,15 @@ export async function verificarBackend(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function confirmarSincronizacion(
+  sesionId: string,
+  nombreCalendario: string
+): Promise<void> {
+  await fetch(`${API_URL}/sincronizacion/${sesionId}/confirmar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nombre_calendario: nombreCalendario }),
+  });
 }
