@@ -26,6 +26,10 @@ export interface EstadoSesion {
     paideia: boolean;
   };
   logs?: string[];
+  pdfs?: any[];
+  insertados?: number;
+  total_insertar?: number;
+  ultimo_evento?: string;
 }
 
 // Inicia una nueva sincronización

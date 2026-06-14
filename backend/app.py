@@ -2,6 +2,7 @@
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from google_calendar.calendar_inserter import insertar_eventos, limpiar_calendario, _construir_evento_google
 import uuid
 import threading
 import sys
@@ -130,6 +131,18 @@ def ejecutar_rpa(sesion_id: str, config: dict):
                 mensaje=f"{len(eventos_paideia)} entregas extraídas de PAIDEIA")
             log(sesion_id, f"PAIDEIA: {len(eventos_paideia)} eventos")
 
+            # Guardar PDFs en el estado para P7
+            pdfs_estado = []
+            if hasattr(paideia, 'cronogramas_detectados'):
+                for pdf in paideia.cronogramas_detectados:
+                    pdfs_estado.append({
+                        "nombre": pdf.get("nombre", ""),
+                        "curso": pdf.get("curso", ""),
+                        "estado": pdf.get("estado", "revision"),
+                        "mensaje": pdf.get("mensaje", "")
+                    })
+                actualizar_sesion(sesion_id, pdfs=pdfs_estado)
+
         # ── Google Calendar ───────────────────────────────────────────────
         actualizar_sesion(sesion_id,
             estado="esperando_confirmacion",
@@ -185,7 +198,32 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             progreso=90)
 
         eventos_finales = resolver_conflictos(eventos_campus, eventos_paideia)
-        insertar_eventos(creds, eventos_finales, calendar_id=nuevo_calendar_id)
+
+        # Insertar con progreso en tiempo real
+        total_insertar = len(eventos_finales)
+        actualizar_sesion(sesion_id, total_insertar=total_insertar, insertados=0)
+
+        from googleapiclient.discovery import build as build_service
+        service_cal = build_service("calendar", "v3", credentials=creds)
+
+        insertados = 0
+        for evento in eventos_finales:
+            evento_google = _construir_evento_google(evento)
+            if evento_google is None:
+                continue
+            try:
+                service_cal.events().insert(
+                    calendarId=nuevo_calendar_id,
+                    body=evento_google,
+                ).execute()
+                insertados += 1
+                ultimo = evento_google.get("summary", "")
+                actualizar_sesion(sesion_id,
+                    insertados=insertados,
+                    ultimo_evento=ultimo,
+                    progreso=85 + int((insertados / total_insertar) * 14))
+            except Exception as e:
+                log(sesion_id, f"Error insertando evento: {e}")
 
         actualizar_sesion(sesion_id,
             estado="completado",
@@ -196,15 +234,6 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             total_paideia=len(eventos_paideia),
             nombre_calendario=nombre_cal,
             calendar_id=nuevo_calendar_id)
-
-        actualizar_sesion(sesion_id,
-            estado="completado",
-            mensaje="Sincronización completada exitosamente",
-            progreso=100,
-            eventos=eventos_finales,
-            total_campus=len(eventos_campus),
-            total_paideia=len(eventos_paideia))
-        log(sesion_id, f"Completado: {len(eventos_finales)} eventos insertados")
 
     except Exception as e:
         actualizar_sesion(sesion_id,

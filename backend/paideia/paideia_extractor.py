@@ -228,7 +228,8 @@ class PaideiaExtractor:
             return recorridos
         query = f"{anio}-{ciclo}"
 
-        for curso in cursos:
+        #for curso in cursos:
+        for curso in cursos[1:2]:    
             url = curso.get("url") or ""
             if not url:
                 continue
@@ -422,13 +423,20 @@ class PaideiaExtractor:
             const h = r.href.toLowerCase();
             const t = normalizeStr(r.title);
             const x = normalizeStr(r.text);
-            const isPdf = h.includes('.pdf');
+            
+            const isResource = (
+                h.includes('.pdf') || 
+                h.includes('pluginfile.php') ||
+                h.includes('mod/resource/view.php')
+            );
+            
             const hasCronograma = (
                 h.includes('cronograma') || 
                 t.includes('cronograma') || 
                 x.includes('cronograma')
             );
-            return isPdf && hasCronograma;
+            
+            return isResource && hasCronograma;
         };
 
         const filtered = rows.filter(isCronograma);

@@ -41,7 +41,7 @@ function ConfirmacionPage() {
     if (!sesionId || !nombreCalendario) return;
     setConfirmando(true);
     await confirmarSincronizacion(sesionId, nombreCalendario);
-    router.push(`/resultado?sesion=${sesionId}`);
+    window.location.href = `/progreso-sync?sesion=${sesionId}`;
   };
 
   if (!listo) return (
