@@ -470,10 +470,30 @@ class PaideiaExtractor:
             destino = carpeta_curso / nombre
             if destino.exists() and destino.stat().st_size > 0:
                 guardados.append(destino)
+                self.cronogramas_descargados.append({
+                    "curso": titulo,
+                    "course_id": curso_id,
+                    "archivo": destino.name,
+                    "ruta": str(destino),
+                    "url": href,
+                })
+                print(f"    Reutilizado cronograma existente: {destino.name}")
                 continue
 
             try:
-                self._descargar_url_con_sesion(href, destino)
+                # Navegar a la página del recurso para obtener la URL real del PDF
+                self.driver.get(href)
+                time.sleep(2)
+                # Buscar el enlace directo al PDF en la página de recurso
+                pdf_links = self.driver.find_elements(
+                    By.CSS_SELECTOR, 
+                    "a[href*='pluginfile.php']"
+                )
+                if pdf_links:
+                    href_real = pdf_links[0].get_attribute("href")
+                    self._descargar_url_con_sesion(href_real, destino)
+                else:
+                    self._descargar_url_con_sesion(href, destino)
                 guardados.append(destino)
                 self.cronogramas_descargados.append(
                     {
@@ -486,7 +506,9 @@ class PaideiaExtractor:
                 )
                 print(f"    Guardado cronograma: {destino.name}")
             except Exception as e:
+                import traceback
                 print(f"    Advertencia: fallo al descargar cronograma {href}: {e}")
+                print(f"    Detalle: {traceback.format_exc()}")
 
         return guardados
 

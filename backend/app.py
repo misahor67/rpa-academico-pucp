@@ -1,14 +1,13 @@
 # backend/app.py
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from google_calendar.calendar_inserter import insertar_eventos, limpiar_calendario, _construir_evento_google
+from google_calendar.calendar_inserter import _construir_evento_google
 import uuid
 import threading
 import sys
 import os
 
-# Agregar el directorio backend al path para importar los módulos del RPA
 sys.path.insert(0, os.path.dirname(__file__))
 
 app = FastAPI(
@@ -25,17 +24,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Almacén de sesiones en memoria
 sesiones = {}
 
-# ── Modelos ───────────────────────────────────────────────────────────────────
 class ConfiguracionSincronizacion(BaseModel):
     ciclo: int
     anio: int
     campus: bool
     paideia: bool
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+class ConfirmacionBody(BaseModel):
+    nombre_calendario: str
+
 def actualizar_sesion(sesion_id: str, **kwargs):
     if sesion_id in sesiones:
         sesiones[sesion_id].update(kwargs)
@@ -44,10 +43,9 @@ def log(sesion_id: str, mensaje: str):
     if sesion_id in sesiones:
         logs = sesiones[sesion_id].get("logs", [])
         logs.append(mensaje)
-        sesiones[sesion_id]["logs"] = logs[-20:]  # máximo 20 logs
+        sesiones[sesion_id]["logs"] = logs[-20:]
     print(mensaje)
 
-# ── Proceso RPA en background ─────────────────────────────────────────────────
 def ejecutar_rpa(sesion_id: str, config: dict):
     try:
         from create_driver import create_driver
@@ -55,8 +53,7 @@ def ejecutar_rpa(sesion_id: str, config: dict):
         from paideia.paideia_extractor import PaideiaExtractor
         from google_calendar.auth import get_credentials
         from google_calendar.conflict_resolver import resolver_conflictos
-        from google_calendar.calendar_inserter import insertar_eventos, limpiar_calendario
-        from config import ICS_DIR, PAIDEIA_CRONOGRAMAS_DIR, CALENDAR_ID
+        from config import ICS_DIR, PAIDEIA_CRONOGRAMAS_DIR
 
         ciclo = config["ciclo"]
         anio = config["anio"]
@@ -65,6 +62,7 @@ def ejecutar_rpa(sesion_id: str, config: dict):
 
         eventos_campus = []
         eventos_paideia = []
+        pdfs_estado = []
         _driver = None
 
         # ── Campus Virtual ────────────────────────────────────────────────────
@@ -126,35 +124,34 @@ def ejecutar_rpa(sesion_id: str, config: dict):
 
             eventos_paideia = paideia.extraer_eventos(ciclo, anio)
 
+            # Guardar PDFs detectados para P7
+            if hasattr(paideia, 'cronogramas_descargados'):
+                for pdf in paideia.cronogramas_descargados:
+                    pdfs_estado.append({
+                        "nombre": pdf.get("archivo", "cronograma.pdf"),
+                        "curso": pdf.get("curso", ""),
+                        "estado": "procesable",
+                        "mensaje": "Cronograma descargado correctamente."
+                    })
+
             actualizar_sesion(sesion_id,
                 progreso=80,
+                pdfs=pdfs_estado,
                 mensaje=f"{len(eventos_paideia)} entregas extraídas de PAIDEIA")
-            log(sesion_id, f"PAIDEIA: {len(eventos_paideia)} eventos")
+            log(sesion_id, f"PAIDEIA: {len(eventos_paideia)} eventos — {len(pdfs_estado)} PDFs")
 
-            # Guardar PDFs en el estado para P7
-            pdfs_estado = []
-            if hasattr(paideia, 'cronogramas_detectados'):
-                for pdf in paideia.cronogramas_detectados:
-                    pdfs_estado.append({
-                        "nombre": pdf.get("nombre", ""),
-                        "curso": pdf.get("curso", ""),
-                        "estado": pdf.get("estado", "revision"),
-                        "mensaje": pdf.get("mensaje", "")
-                    })
-                actualizar_sesion(sesion_id, pdfs=pdfs_estado)
-
-        # ── Google Calendar ───────────────────────────────────────────────
+        # ── Esperar confirmación del usuario (P8) ─────────────────────────────
         actualizar_sesion(sesion_id,
             estado="esperando_confirmacion",
             mensaje="Extracción completada. Esperando confirmación del usuario...",
             progreso=82,
             total_campus=len(eventos_campus),
-            total_paideia=len(eventos_paideia))
+            total_paideia=len(eventos_paideia),
+            pdfs=pdfs_estado)
 
-        # Esperar hasta que el usuario confirme desde P8
         import time as time_module
         log(sesion_id, "Esperando confirmación del usuario...")
-        timeout = 300  # 5 minutos para confirmar
+        timeout = 300
         elapsed = 0
         confirmado = False
         while elapsed < timeout:
@@ -168,38 +165,48 @@ def ejecutar_rpa(sesion_id: str, config: dict):
         if not confirmado:
             actualizar_sesion(sesion_id,
                 estado="error",
-                mensaje="Tiempo de espera agotado. El usuario no confirmó la sincronización.")
+                mensaje="Tiempo de espera agotado. El usuario no confirmó.")
             return
 
         nombre_cal = sesiones[sesion_id].get(
             "nombre_calendario", f"RPA Académico — {sesion_id[:8]}")
 
+        # ── Crear calendario ──────────────────────────────────────────────────
         actualizar_sesion(sesion_id,
             estado="sincronizando",
             mensaje="Creando calendario en Google Calendar...",
             progreso=85)
 
-        # Crear calendario y obtener su ID
+        # Crear calendario — eliminar si ya existe uno con el mismo nombre
         creds = get_credentials()
         from googleapiclient.discovery import build
         service = build("calendar", "v3", credentials=creds)
 
+        # Buscar y eliminar calendario existente con el mismo nombre
+        calendarios = service.calendarList().list().execute()
+        for cal in calendarios.get("items", []):
+            if cal.get("summary") == nombre_cal:
+                service.calendars().delete(calendarId=cal["id"]).execute()
+                log(sesion_id, f"Calendario anterior eliminado: {nombre_cal}")
+                break
+
+        # Crear nuevo calendario limpio
         calendario_nuevo = service.calendars().insert(body={
             "summary": nombre_cal,
             "timeZone": "America/Lima"
         }).execute()
 
         nuevo_calendar_id = calendario_nuevo["id"]
-        log(sesion_id, f"Calendario creado: {nombre_cal} ({nuevo_calendar_id})")
+        log(sesion_id, f"Calendario creado: {nombre_cal}")
 
         actualizar_sesion(sesion_id,
             estado="sincronizando",
             mensaje="Insertando eventos en Google Calendar...",
-            progreso=90)
+            nombre_calendario=nombre_cal,
+            progreso=88)
 
+        # ── Insertar eventos con progreso ─────────────────────────────────────
         eventos_finales = resolver_conflictos(eventos_campus, eventos_paideia)
-
-        # Insertar con progreso en tiempo real
         total_insertar = len(eventos_finales)
         actualizar_sesion(sesion_id, total_insertar=total_insertar, insertados=0)
 
@@ -221,10 +228,11 @@ def ejecutar_rpa(sesion_id: str, config: dict):
                 actualizar_sesion(sesion_id,
                     insertados=insertados,
                     ultimo_evento=ultimo,
-                    progreso=85 + int((insertados / total_insertar) * 14))
+                    progreso=88 + int((insertados / total_insertar) * 11))
             except Exception as e:
                 log(sesion_id, f"Error insertando evento: {e}")
 
+        # ── Completado ────────────────────────────────────────────────────────
         actualizar_sesion(sesion_id,
             estado="completado",
             mensaje="Sincronización completada exitosamente",
@@ -234,6 +242,7 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             total_paideia=len(eventos_paideia),
             nombre_calendario=nombre_cal,
             calendar_id=nuevo_calendar_id)
+        log(sesion_id, f"Completado: {len(eventos_finales)} eventos insertados")
 
     except Exception as e:
         actualizar_sesion(sesion_id,
@@ -269,19 +278,18 @@ def iniciar_sincronizacion(config: ConfiguracionSincronizacion):
         "logs": [],
         "total_campus": 0,
         "total_paideia": 0,
+        "pdfs": [],
     }
-    # Ejecutar RPA en hilo separado para no bloquear la API
     hilo = threading.Thread(
         target=ejecutar_rpa,
         args=(sesion_id, config.dict()),
         daemon=True
     )
     hilo.start()
-
     return {
         "sesion_id": sesion_id,
         "estado": "iniciado",
-        "mensaje": "Proceso iniciado. Abre Campus Virtual en el navegador."
+        "mensaje": "Proceso iniciado."
     }
 
 @app.get("/sincronizacion/{sesion_id}/estado")
@@ -289,7 +297,7 @@ def obtener_estado(sesion_id: str):
     if sesion_id not in sesiones:
         return {"error": "Sesión no encontrada"}
     sesion = sesiones[sesion_id].copy()
-    sesion.pop("eventos", None)  # no enviar eventos completos aquí
+    sesion.pop("eventos", None)
     return sesion
 
 @app.get("/sincronizacion/{sesion_id}/eventos")
@@ -303,9 +311,6 @@ def obtener_eventos(sesion_id: str):
         "total_paideia": sesiones[sesion_id].get("total_paideia", 0),
         "eventos": sesiones[sesion_id].get("eventos", [])
     }
-
-class ConfirmacionBody(BaseModel):
-    nombre_calendario: str
 
 @app.post("/sincronizacion/{sesion_id}/confirmar")
 def confirmar_sincronizacion(sesion_id: str, body: ConfirmacionBody):

@@ -34,37 +34,42 @@ function ProgresoPaideiaPage() {
 
   const [entregasExtraidas] = useState(3);
 
-useEffect(() => {
-  if (!sesionId) {
-    router.push("/");
-    return;
-  }
-
-  const intervalo = setInterval(async () => {
-    try {
-      const estado = await obtenerEstado(sesionId);
-      console.log("Estado P6:", estado.estado);
-
-      if (estado.estado === "esperando_confirmacion") {
-        clearInterval(intervalo);
-        window.location.href = `/confirmacion?sesion=${sesionId}`;
-      }
-      if (estado.estado === "sincronizando" ||
-          estado.estado === "completado") {
-        clearInterval(intervalo);
-        window.location.href = `/resultado?sesion=${sesionId}`;
-      }
-      if (estado.estado === "error") {
-        clearInterval(intervalo);
-        window.location.href = `/resultado?sesion=${sesionId}`;
-      }
-    } catch {
-      console.error("Error al obtener estado");
+  useEffect(() => {
+    if (!sesionId) {
+      router.push("/");
+      return;
     }
-  }, 1500);
 
-  return () => clearInterval(intervalo);
-}, [sesionId, router]);
+    const intervalo = setInterval(async () => {
+      try {
+        const estado = await obtenerEstado(sesionId);
+        console.log("Estado P6:", estado.estado);
+
+        if (estado.estado === "esperando_confirmacion") {
+          clearInterval(intervalo);
+          const tienePdfs = estado.pdfs && estado.pdfs.length > 0;
+          if (tienePdfs) {
+            window.location.href = `/estado-pdf?sesion=${sesionId}`;
+          } else {
+            window.location.href = `/confirmacion?sesion=${sesionId}`;
+          }
+        }
+        if (estado.estado === "sincronizando" ||
+            estado.estado === "completado") {
+          clearInterval(intervalo);
+          window.location.href = `/resultado?sesion=${sesionId}`;
+        }
+        if (estado.estado === "error") {
+          clearInterval(intervalo);
+          window.location.href = `/resultado?sesion=${sesionId}`;
+        }
+      } catch {
+        console.error("Error al obtener estado");
+      }
+    }, 1500);
+
+    return () => clearInterval(intervalo);
+  }, [sesionId, router]);
 
   const completados = cursos.filter(c => c.estado === "completado").length;
   const progreso = Math.round((completados / cursos.length) * 100);
