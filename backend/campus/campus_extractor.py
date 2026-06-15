@@ -185,11 +185,12 @@ class CampusCalendarioIcs:
         self.driver.execute_script("arguments[0].click();", btn)
         time.sleep(2)
 
-    def descargar_ics_ciclo(self, ciclo: int, anio: int) -> list[Path]:
+    def descargar_ics_ciclo(self, ciclo: int, anio: int, callback=None) -> list[Path]:
         """
         Descarga un .ics por cada mes del ciclo indicado.
         Omite meses que ya tienen archivo en disco.
         Devuelve la lista de rutas guardadas.
+        Si se pasa callback(mes, destino), se llama después de cada mes.
         """
         meses = CICLOS[ciclo]["meses"]
         nombre_ciclo = CICLOS[ciclo]["nombre"]
@@ -208,20 +209,20 @@ class CampusCalendarioIcs:
             if destino.exists() and destino.stat().st_size > 0:
                 print(f"  Ya existe: {destino.name}")
                 guardados.append(destino)
+                if callback:
+                    callback(mes, destino)
                 continue
 
             self._handle_alert()
             self.navegar_a_mes(mes, anio)
             time.sleep(0.8)
 
-            # Verificar que la navegación fue correcta
             mes_leido, anio_leido = self.get_mes_anio_actual()
             if (mes_leido, anio_leido) != (mes, anio):
                 print(f"  Aviso: calendario muestra {mes_leido}/{anio_leido}, reintentando…")
                 self.navegar_a_mes(mes, anio)
                 time.sleep(0.8)
 
-            # Snapshot de archivos previos para detectar el nuevo .ics
             antes = {p.name for p in self.download_dir.iterdir() if p.is_file()}
 
             self.click_ver_mes()
@@ -235,6 +236,8 @@ class CampusCalendarioIcs:
 
             print(f"  Guardado: {destino.name}")
             guardados.append(destino)
+            if callback:
+                callback(mes, destino)
 
         return guardados
 

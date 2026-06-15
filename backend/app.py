@@ -53,7 +53,7 @@ def ejecutar_rpa(sesion_id: str, config: dict):
         from paideia.paideia_extractor import PaideiaExtractor
         from google_calendar.auth import get_credentials
         from google_calendar.conflict_resolver import resolver_conflictos
-        from config import ICS_DIR, PAIDEIA_CRONOGRAMAS_DIR
+        from config import ICS_DIR, PAIDEIA_CRONOGRAMAS_DIR, CICLOS, NOMBRES_MESES
 
         ciclo = config["ciclo"]
         anio = config["anio"]
@@ -86,7 +86,36 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             log(sesion_id, "Login Campus Virtual exitoso. Descargando ICS...")
 
             campus.go_to_calendar()
-            campus.descargar_ics_ciclo(ciclo, anio)
+
+            meses_ciclo = CICLOS[ciclo]["meses"]
+
+            # Inicializar meses en pendiente
+            meses_estado = [
+                {"nombre": f"{NOMBRES_MESES[m]} {anio}", "estado": "pendiente", "eventos": 0}
+                for m in meses_ciclo
+            ]
+            actualizar_sesion(sesion_id, meses_campus=meses_estado)
+
+            # Callback que se llama después de cada mes descargado
+            def on_mes_descargado(mes, destino):
+                idx = meses_ciclo.index(mes)
+                count = 0
+                try:
+                    eventos_mes = CampusCalendarioIcs.parsear_ics(destino)
+                    count = len(eventos_mes)
+                except Exception as e:
+                    print(f"Error contando eventos de {destino.name}: {e}")
+                meses_estado[idx]["estado"] = "completado"
+                meses_estado[idx]["eventos"] = count
+                actualizar_sesion(sesion_id,
+                    meses_campus=meses_estado.copy(),
+                    progreso=15 + int(((idx + 1) / len(meses_ciclo)) * 30))
+                log(sesion_id, f"{NOMBRES_MESES[mes]} {anio}: {count} eventos")
+
+            # Descargar con callback
+            campus.descargar_ics_ciclo(ciclo, anio, callback=on_mes_descargado)
+
+            # Extraer todos los eventos
             eventos_campus = campus.extraer_eventos_desde_ics(ciclo, anio)
 
             actualizar_sesion(sesion_id,
@@ -177,12 +206,10 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             mensaje="Creando calendario en Google Calendar...",
             progreso=85)
 
-        # Crear calendario — eliminar si ya existe uno con el mismo nombre
         creds = get_credentials()
         from googleapiclient.discovery import build
         service = build("calendar", "v3", credentials=creds)
 
-        # Buscar y eliminar calendario existente con el mismo nombre
         calendarios = service.calendarList().list().execute()
         for cal in calendarios.get("items", []):
             if cal.get("summary") == nombre_cal:
@@ -190,7 +217,6 @@ def ejecutar_rpa(sesion_id: str, config: dict):
                 log(sesion_id, f"Calendario anterior eliminado: {nombre_cal}")
                 break
 
-        # Crear nuevo calendario limpio
         calendario_nuevo = service.calendars().insert(body={
             "summary": nombre_cal,
             "timeZone": "America/Lima"

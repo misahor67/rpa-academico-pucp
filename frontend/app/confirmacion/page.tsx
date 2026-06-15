@@ -16,6 +16,7 @@ function ConfirmacionPage() {
   const [ciclo, setCiclo] = useState("");
   const [confirmando, setConfirmando] = useState(false);
   const [listo, setListo] = useState(false);
+  const [totalPdfs, setTotalPdfs] = useState(0);
 
   const CICLOS: Record<number, string> = {
     0: "Verano", 1: "Regular 1", 2: "Regular 2"
@@ -27,6 +28,7 @@ function ConfirmacionPage() {
     obtenerEstado(sesionId).then((estado) => {
       setTotalCampus(estado.total_campus || 0);
       setTotalPaideia(estado.total_paideia || 0);
+      if (estado.pdfs) setTotalPdfs(estado.pdfs.length);
       if (estado.config) {
         const nombreCiclo = CICLOS[estado.config.ciclo];
         const anio = estado.config.anio;
@@ -69,10 +71,11 @@ function ConfirmacionPage() {
         </div>
 
         {/* Métricas */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           {[
             { label: "Campus Virtual", valor: totalCampus, color: "text-[#111827]" },
             { label: "PAIDEIA", valor: totalPaideia, color: "text-[#111827]" },
+            { label: "PDFs detectados", valor: totalPdfs, color: "text-[#F59E0B]" },
             { label: "Duplicados", valor: 0, color: "text-[#6B7280]" },
             { label: "Total a insertar", valor: total, color: "text-[#2563EB]", destacado: true },
           ].map((m, i) => (

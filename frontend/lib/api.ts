@@ -30,6 +30,11 @@ export interface EstadoSesion {
   insertados?: number;
   total_insertar?: number;
   ultimo_evento?: string;
+  meses_campus?: Array<{
+    nombre: string;
+    estado: string;
+    eventos: number;
+  }>;
 }
 
 // Inicia una nueva sincronización
