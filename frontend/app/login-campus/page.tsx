@@ -9,6 +9,7 @@ function LoginCampusPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sesionId = searchParams.get("sesion");
+  const fuente = searchParams.get("fuente"); // "campus", "paideia" o "ambas"
   const [mensaje, setMensaje] = useState("Detectando sesión...");
 
   useEffect(() => {
@@ -68,21 +69,26 @@ function LoginCampusPage() {
             mensaje.includes("PAIDEIA") ? "text-[#10B981]" : "text-[#2563EB]"
           }`}>Campus Virtual</span>
         </div>
-        <div className={`w-16 h-0.5 mb-4 ${
-          mensaje.includes("PAIDEIA") ? "bg-[#10B981]" : "bg-[#D1D5DB]"
-        }`} />
-        <div className="flex flex-col items-center gap-1">
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-            mensaje.includes("PAIDEIA")
-              ? "bg-[#2563EB] text-white"
-              : "border-2 border-[#D1D5DB] text-[#9CA3AF]"
-          }`}>
-            2
-          </div>
-          <span className={`text-xs font-medium ${
-            mensaje.includes("PAIDEIA") ? "text-[#2563EB]" : "text-[#9CA3AF]"
-          }`}>PAIDEIA</span>
-        </div>
+
+        {fuente === "ambas" && (
+          <>
+            <div className={`w-16 h-0.5 mb-4 ${
+              mensaje.includes("PAIDEIA") ? "bg-[#10B981]" : "bg-[#D1D5DB]"
+            }`} />
+            <div className="flex flex-col items-center gap-1">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                mensaje.includes("PAIDEIA")
+                  ? "bg-[#2563EB] text-white"
+                  : "border-2 border-[#D1D5DB] text-[#9CA3AF]"
+              }`}>
+                2
+              </div>
+              <span className={`text-xs font-medium ${
+                mensaje.includes("PAIDEIA") ? "text-[#2563EB]" : "text-[#9CA3AF]"
+              }`}>PAIDEIA</span>
+            </div>
+          </>
+        )}
       </div>
 
       <main className="flex flex-col items-center justify-center min-h-[calc(100vh-160px)] gap-6 px-4">

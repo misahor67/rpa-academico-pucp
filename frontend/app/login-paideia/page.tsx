@@ -10,6 +10,7 @@ function LoginPaideiaPage() {
   const searchParams = useSearchParams();
   const sesionId = searchParams.get("sesion");
   const [mensaje, setMensaje] = useState("Detectando sesión...");
+  const fuente = searchParams.get("fuente"); // "paideia" o "ambas"
 
   useEffect(() => {
     if (!sesionId) { router.push("/"); return; }
@@ -17,8 +18,15 @@ function LoginPaideiaPage() {
     const intervalo = setInterval(async () => {
       try {
         const estado = await obtenerEstado(sesionId);
-        console.log("Estado P6:", estado.estado);
+        console.log("Estado P4:", estado.estado);
 
+        // Navegar a P6 cuando el backend empieza a extraer PAIDEIA
+        if (estado.estado === "extrayendo_paideia") {
+          clearInterval(intervalo);
+          router.push(`/progreso-paideia?sesion=${sesionId}`);
+        }
+
+        // Por si acaso se salta el estado extrayendo_paideia
         if (estado.estado === "esperando_confirmacion") {
           clearInterval(intervalo);
           router.push(`/confirmacion?sesion=${sesionId}`);
@@ -50,16 +58,20 @@ function LoginPaideiaPage() {
 
       {/* Indicador de pasos */}
       <div className="flex justify-center pt-8 gap-4 items-center">
-        <div className="flex flex-col items-center gap-1">
-          <div className="w-8 h-8 rounded-full bg-[#10B981] flex items-center justify-center text-white text-sm font-bold">
-            ✓
-          </div>
-          <span className="text-xs text-[#10B981] font-medium">Campus Virtual</span>
-        </div>
-        <div className="w-16 h-0.5 bg-[#10B981] mb-4" />
+        {fuente === "ambas" && (
+          <>
+            <div className="flex flex-col items-center gap-1">
+              <div className="w-8 h-8 rounded-full bg-[#10B981] flex items-center justify-center text-white text-sm font-bold">
+                ✓
+              </div>
+              <span className="text-xs text-[#10B981] font-medium">Campus Virtual</span>
+            </div>
+            <div className="w-16 h-0.5 bg-[#10B981] mb-4" />
+          </>
+        )}
         <div className="flex flex-col items-center gap-1">
           <div className="w-8 h-8 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-sm font-bold">
-            2
+            1
           </div>
           <span className="text-xs text-[#2563EB] font-medium">PAIDEIA</span>
         </div>

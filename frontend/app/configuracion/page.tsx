@@ -32,7 +32,8 @@ export default function Configuracion() {
       };
       const respuesta = await iniciarSincronizacion(config);
       // Navegar a la pantalla de login con el ID de sesión
-      router.push(`/login-campus?sesion=${respuesta.sesion_id}`);
+      const siguientePantalla = fuente === "paideia" ? "login-paideia" : "login-campus";
+      router.push(`/${siguientePantalla}?sesion=${respuesta.sesion_id}&fuente=${fuente}`);
     } catch (error) {
       console.error("Error al iniciar sincronización:", error);
     } finally {
@@ -60,7 +61,20 @@ export default function Configuracion() {
           Configurar sincronización
         </h1>
 
-        {/* Sección 1 — Ciclo */}
+        {/* Sección 1 — Año */}
+        <section className="flex flex-col gap-3">
+          <label className="font-semibold text-sm text-[#111827]">
+            Año del ciclo
+          </label>
+          <input
+            type="number"
+            value={anio}
+            onChange={(e) => setAnio(Number(e.target.value))}
+            className="w-40 border border-[#D1D5DB] rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#2563EB]"
+          />
+        </section>
+
+        {/* Sección 2 — Ciclo */}
         <section className="flex flex-col gap-3">
           <label className="font-semibold text-sm text-[#111827]">
             Ciclo académico
@@ -85,19 +99,6 @@ export default function Configuracion() {
               </button>
             ))}
           </div>
-        </section>
-
-        {/* Sección 2 — Año */}
-        <section className="flex flex-col gap-3">
-          <label className="font-semibold text-sm text-[#111827]">
-            Año del ciclo
-          </label>
-          <input
-            type="number"
-            value={anio}
-            onChange={(e) => setAnio(Number(e.target.value))}
-            className="w-40 border border-[#D1D5DB] rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#2563EB]"
-          />
         </section>
 
         {/* Sección 3 — Fuentes */}

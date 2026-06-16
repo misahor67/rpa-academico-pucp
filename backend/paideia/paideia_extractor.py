@@ -27,7 +27,7 @@ class PaideiaExtractor:
         self.cronogramas_dir = cronogramas_dir
         self.cronogramas_dir.mkdir(parents=True, exist_ok=True)
         self.cronogramas_descargados: list[dict] = []
-        self.cronogramas_urls_por_curso: dict[str, set[str]] = {}  # track URLs per course to deduplicate
+        self.cronogramas_urls_por_curso: dict[str, set[str]] = {}
         self.entregables_extraidos: list[dict] = []
 
     # ------------------------------------------------------------------
@@ -38,11 +38,12 @@ class PaideiaExtractor:
         """Abre Paideia y espera a que el usuario haga login manual."""
         self.driver.get("https://paideiacursos.pucp.edu.pe/my/courses.php")
         print("Ingresa tus credenciales en el navegador de Paideia…")
-        # Espera robusta: el sitio puede mostrar distintos elementos tras el login.
+        print(f"URL actual al abrir: {self.driver.current_url}")  # ← agregar
         deadline = time.time() + 300
         found = False
         while time.time() < deadline:
             try:
+                print(f"Verificando login... URL: {self.driver.current_url}")  # ← agregar
                 if self.driver.find_elements(By.CLASS_NAME, "coursebox"):
                     print("Login detectado en Paideia (coursebox presente).")
                     found = True
@@ -59,19 +60,13 @@ class PaideiaExtractor:
             print("Advertencia: no se detectó el área de cursos ni el buscador tras el login (timeout). Continuando de todas formas.")
 
     def search_courses(self, query: str):
-        """Introduce `query` en el buscador de cursos y ejecuta la búsqueda.
-
-        Usa el contenedor con `role="search"` y busca el input interno.
-        """
+        """Introduce `query` en el buscador de cursos y ejecuta la búsqueda."""
         input_el = self._obtener_input_buscador()
-
-        # Intentar escribir de forma natural (click + send_keys)
         try:
             input_el.click()
         except Exception:
             pass
 
-        # Escribir y validar con reintentos para evitar timing issues del frontend.
         last_error = None
         for intento in range(1, 4):
             try:
@@ -117,7 +112,6 @@ class PaideiaExtractor:
 
         typed_ok = False
         try:
-            # Escribir poco a poco para respetar el debounce del buscador.
             for ch in query:
                 input_el.send_keys(ch)
                 time.sleep(0.05)
@@ -146,7 +140,6 @@ class PaideiaExtractor:
             if cursos:
                 print(f"  Resultados filtrados listos: {len(cursos)}")
                 return cursos
-            # Verificar también que el input conserva la consulta esperada.
             try:
                 inp = self._obtener_input_buscador()
                 val = (inp.get_attribute("value") or "").strip().lower()
@@ -159,43 +152,46 @@ class PaideiaExtractor:
         raise TimeoutError(f"No se cargaron resultados filtrados para {query}")
 
     def buscar_por_ciclo(self, ciclo: int, anio: int) -> bool:
-        """Construye la cadena `AAAA-C` e inserta en el buscador.
-
-        Ejemplo: `2025-2`.
-        """
+        """Construye la cadena `AAAA-C` e inserta en el buscador."""
         query = f"{anio}-{ciclo}"
         print(f"Iniciando búsqueda por ciclo en Paideia: {query}")
         self.search_courses(query)
         return True
 
     # ------------------------------------------------------------------
-    # EXTRACCIÓN (pendiente de implementar)
+    # EXTRACCIÓN
     # ------------------------------------------------------------------
 
-    def extraer_eventos(self, ciclo: int, anio: int) -> list[dict]:
+    def extraer_eventos(self, ciclo: int, anio: int, callback=None) -> list[dict]:
         """
         Punto de entrada principal.
         Devuelve lista de dicts con el mismo esquema que CampusCalendarioIcs.
-        (pendiente de implementar)
+
+        callback: función opcional que se llama después de procesar cada curso.
+            Firma: callback(curso_info: dict)
+            Donde curso_info contiene:
+                - titulo: str
+                - course_id: str
+                - secciones: int
+                - entregas: int
+                - pdfs: int
+                - idx: int        (índice 0-based del curso actual)
+                - total: int      (total de cursos)
         """
-        # Reiniciar acumuladores por ejecución
         self.entregables_extraidos = []
 
-        # Extraer lista de cursos visibles tras la búsqueda (preparatorio)
         cursos = []
         try:
             cursos = self.obtener_lista_cursos(query=f"{anio}-{ciclo}")
         except Exception as e:
             print(f"Advertencia: no se pudo leer la lista de cursos: {e}")
 
-        # Mostrar un resumen y devolver lista vacía por ahora (implementación posterior)
         print(f"Cursos encontrados tras búsqueda: {len(cursos)}")
         for c in cursos[:10]:
             print(f"  - {c.get('titulo')} -> {c.get('url')}")
 
-        # Recorrer cada curso como paso siguiente del flujo
         try:
-            self.recorrer_cursos(cursos, ciclo, anio)
+            self.recorrer_cursos(cursos, ciclo, anio, callback=callback)
         except Exception as e:
             print(f"Advertencia: no se pudo recorrer la lista de cursos: {e}")
 
@@ -216,25 +212,29 @@ class PaideiaExtractor:
 
         return self.entregables_extraidos
 
-    def recorrer_cursos(self, cursos: list[dict], ciclo: int, anio: int) -> list[dict]:
+    def recorrer_cursos(self, cursos: list[dict], ciclo: int, anio: int, callback=None) -> list[dict]:
         """Recorre cada curso en la misma pestaña y regresa a la lista al terminar.
 
-        Se navega al curso con `driver.get(url)` y luego se vuelve con `driver.back()`.
-        Si la lista no reaparece, se repite la búsqueda `AAAA-C` para restaurarla.
-        Devuelve un resumen por curso visitado.
+        callback: función opcional llamada después de procesar cada curso.
         """
         recorridos: list[dict] = []
         if not cursos:
             return recorridos
         query = f"{anio}-{ciclo}"
+        total = len(cursos)
 
-        #for curso in cursos:
-        for curso in cursos[1:2]:    
+        for idx, curso in enumerate(cursos):
             url = curso.get("url") or ""
             if not url:
                 continue
 
             print(f"Recorriendo curso: {curso.get('titulo')}")
+
+            # Contadores antes de procesar este curso
+            entregas_antes = len(self.entregables_extraidos)
+            pdfs_antes = len(self.cronogramas_descargados)
+
+            secciones_recorridas = 0
 
             try:
                 self.driver.get(url)
@@ -263,7 +263,8 @@ class PaideiaExtractor:
                 })
 
                 try:
-                    self.recorrer_secciones_curso(curso)
+                    resultado_secciones = self.recorrer_secciones_curso(curso)
+                    secciones_recorridas = len(resultado_secciones)
                 except Exception as e:
                     print(f"  Advertencia: no se pudieron recorrer las secciones de este curso: {e}")
 
@@ -277,25 +278,34 @@ class PaideiaExtractor:
                 except Exception:
                     pass
 
+                # Llamar callback con datos reales de este curso
+                if callback:
+                    entregas_curso = len(self.entregables_extraidos) - entregas_antes
+                    pdfs_curso = len(self.cronogramas_descargados) - pdfs_antes
+                    try:
+                        callback({
+                            "titulo": curso.get("titulo", ""),
+                            "course_id": curso.get("course_id", ""),
+                            "secciones": secciones_recorridas,
+                            "entregas": entregas_curso,
+                            "pdfs": pdfs_curso,
+                            "idx": idx,
+                            "total": total,
+                        })
+                    except Exception as e:
+                        print(f"  Advertencia: error en callback de curso: {e}")
+
         print(f"Cursos recorridos: {len(recorridos)}")
         return recorridos
 
     def recorrer_secciones_curso(self, curso: dict) -> list[dict]:
-        """Recorre cada sección visible de un curso usando la barra lateral izquierda.
-
-        Captura las secciones desde el DOM, navega a cada una en la misma pestaña y
-        regresa al curso con `back()` para continuar con la siguiente.
-        
-        Busca cronogramas en TODAS las secciones (no solo "General") y deduplica
-        por URL para evitar descargar el mismo PDF múltiples veces.
-        """
+        """Recorre cada sección visible de un curso usando la barra lateral izquierda."""
         titulo_curso = curso.get("titulo", "")
         curso_id = curso.get("course_id", "")
-        
-        # Inicializar set de URLs descargadas para este curso
+
         if curso_id not in self.cronogramas_urls_por_curso:
             self.cronogramas_urls_por_curso[curso_id] = set()
-        
+
         secciones = self.obtener_secciones_curso()
         print(f"  Secciones encontradas en '{titulo_curso}': {len(secciones)}")
 
@@ -323,17 +333,14 @@ class PaideiaExtractor:
                     "url": url,
                 })
 
-                # Buscar cronogramas en TODAS las secciones (sin filtro de "general")
                 links_cronograma = self.obtener_links_cronograma_en_pagina()
                 if links_cronograma:
-                    # Filtrar duplicados por URL
                     enlaces_nuevos = [
                         link for link in links_cronograma
                         if link.get("href", "").strip() not in self.cronogramas_urls_por_curso[curso_id]
                     ]
                     if enlaces_nuevos:
                         print(f"    Cronogramas detectados: {len(enlaces_nuevos)} (de {len(links_cronograma)} total, {len(links_cronograma) - len(enlaces_nuevos)} duplicados)")
-                        # Marcar URLs como descargadas antes de descargar
                         for link in enlaces_nuevos:
                             href = link.get("href", "").strip()
                             if href:
@@ -344,7 +351,6 @@ class PaideiaExtractor:
                 else:
                     print("    No se detectaron enlaces de cronograma en esta sección.")
 
-                # Extraer eventos (actividades académicas) de la sección
                 try:
                     eventos = self.obtener_eventos_seccion()
                     if eventos:
@@ -362,7 +368,6 @@ class PaideiaExtractor:
                                     f"Apertura: {detalles.get('fecha_apertura') or 'N/D'} | "
                                     f"Cierre: {detalles.get('fecha_cierre') or 'N/D'}"
                                 )
-                                # Volver a la sección después de consultar evento
                                 self.driver.get(url)
                                 time.sleep(0.5)
                     else:
@@ -380,13 +385,7 @@ class PaideiaExtractor:
         return recorridos
 
     def obtener_secciones_curso(self) -> list[dict]:
-        """Obtiene las secciones visibles del curso desde la barra lateral izquierda.
-
-        Usa el DOM real del course index:
-        - contenedor: #course-index .courseindex-section
-        - título de sección: a.courseindex-link[data-for='section_title']
-        - enlace de sección: href de esa misma ancla
-        """
+        """Obtiene las secciones visibles del curso desde la barra lateral izquierda."""
         script = """
         const sections = Array.from(document.querySelectorAll('#course-index .courseindex-section[data-for="section"]'));
         return sections.map(section => {
@@ -402,10 +401,7 @@ class PaideiaExtractor:
         return secciones or []
 
     def obtener_links_cronograma_en_pagina(self) -> list[dict]:
-        """Devuelve enlaces PDF cuyo texto/título/href contenga 'cronograma'.
-        
-        La búsqueda es case-insensitive y tolerante con espacios en blanco.
-        """
+        """Devuelve enlaces PDF cuyo texto/título/href contenga 'cronograma'."""
         script = """
         const anchors = Array.from(document.querySelectorAll('a[href]'));
         const rows = anchors.map(a => ({
@@ -415,7 +411,6 @@ class PaideiaExtractor:
         }));
 
         const normalizeStr = (s) => {
-            // Convertir a minúsculas y normalizar espacios en blanco
             return s.toLowerCase().replace(/\\s+/g, ' ').trim();
         };
 
@@ -423,19 +418,19 @@ class PaideiaExtractor:
             const h = r.href.toLowerCase();
             const t = normalizeStr(r.title);
             const x = normalizeStr(r.text);
-            
+
             const isResource = (
-                h.includes('.pdf') || 
+                h.includes('.pdf') ||
                 h.includes('pluginfile.php') ||
                 h.includes('mod/resource/view.php')
             );
-            
+
             const hasCronograma = (
-                h.includes('cronograma') || 
-                t.includes('cronograma') || 
+                h.includes('cronograma') ||
+                t.includes('cronograma') ||
                 x.includes('cronograma')
             );
-            
+
             return isResource && hasCronograma;
         };
 
@@ -481,12 +476,10 @@ class PaideiaExtractor:
                 continue
 
             try:
-                # Navegar a la página del recurso para obtener la URL real del PDF
                 self.driver.get(href)
                 time.sleep(2)
-                # Buscar el enlace directo al PDF en la página de recurso
                 pdf_links = self.driver.find_elements(
-                    By.CSS_SELECTOR, 
+                    By.CSS_SELECTOR,
                     "a[href*='pluginfile.php']"
                 )
                 if pdf_links:
@@ -495,15 +488,13 @@ class PaideiaExtractor:
                 else:
                     self._descargar_url_con_sesion(href, destino)
                 guardados.append(destino)
-                self.cronogramas_descargados.append(
-                    {
-                        "curso": titulo,
-                        "course_id": curso_id,
-                        "archivo": destino.name,
-                        "ruta": str(destino),
-                        "url": href,
-                    }
-                )
+                self.cronogramas_descargados.append({
+                    "curso": titulo,
+                    "course_id": curso_id,
+                    "archivo": destino.name,
+                    "ruta": str(destino),
+                    "url": href,
+                })
                 print(f"    Guardado cronograma: {destino.name}")
             except Exception as e:
                 import traceback
@@ -561,21 +552,16 @@ class PaideiaExtractor:
         return False
 
     def obtener_eventos_seccion(self) -> list[dict]:
-        """Extrae SOLO entregas (assign) de la sección actual.
-        
-        Filtra exclusivamente actividades de tipo 'assign' (tareas/entregas).
-        Excluye todo lo demás (quiz, forum, labels, etc.).
-        """
+        """Extrae SOLO entregas (assign) de la sección actual."""
         script = """
         const activities = Array.from(document.querySelectorAll('ul.section li.activity[data-for="cmitem"]'));
         return activities.map(activity => {
             const id = activity.getAttribute('data-id') || '';
             const link = activity.querySelector('a.aalink, a.courseindex-link[href]');
-            const title = (link ? (link.innerText || link.textContent) : '').trim() || 
+            const title = (link ? (link.innerText || link.textContent) : '').trim() ||
                           activity.getAttribute('data-activityname') || '';
             const href = link ? link.href : '';
-            
-            // Detectar tipo de actividad por clase
+
             const classes = activity.className || '';
             let tipo = 'unknown';
             if (classes.includes('modtype_assign')) tipo = 'assign';
@@ -585,7 +571,7 @@ class PaideiaExtractor:
             else if (classes.includes('modtype_resource')) tipo = 'resource';
             else if (classes.includes('modtype_url')) tipo = 'url';
             else if (classes.includes('modtype_label')) tipo = 'label';
-            
+
             return {
                 id: id,
                 titulo: title,
@@ -594,7 +580,6 @@ class PaideiaExtractor:
                 classes: classes
             };
         }).filter(item => {
-            // SOLO ENTREGAS (assign)
             return item.tipo === 'assign' && item.titulo && item.url;
         });
         """
@@ -602,17 +587,7 @@ class PaideiaExtractor:
         return eventos or []
 
     def extraer_detalles_evento(self, evento: dict) -> dict:
-        """Entra al evento y extrae detalles: fechas, estado, calificación, etc.
-        
-        Retorna diccionario con:
-        - titulo: nombre del evento
-        - tipo: tipo de actividad (assign, quiz, etc.)
-        - fecha_apertura: datetime
-        - fecha_cierre: datetime
-        - estado_entrega: str (si es applicable)
-        - calificacion: str (si aplica)
-        - descripcion: str
-        """
+        """Entra al evento y extrae detalles: fechas, estado, calificación, etc."""
         url = evento.get("url", "")
         if not url:
             return {}
@@ -627,7 +602,6 @@ class PaideiaExtractor:
             print(f"    Advertencia: no se pudo cargar el evento {evento.get('titulo')}: {e}")
             return {}
 
-        # Extraer detalles con JavaScript
         script = """
         const result = {
             titulo: '',
@@ -639,19 +613,16 @@ class PaideiaExtractor:
             calificacion_sobre: '',
         };
 
-        // Título
         const h1 = document.querySelector('h1');
         if (h1) {
             result.titulo = (h1.innerText || h1.textContent).trim();
         }
 
-        // Descripción (intro)
         const intro = document.querySelector('#intro');
         if (intro) {
             result.descripcion = (intro.innerText || intro.textContent).trim().substring(0, 500);
         }
 
-        // Fechas (activity-dates section)
         const datesDiv = document.querySelector('[data-region="activity-dates"]');
         if (datesDiv) {
             const divs = Array.from(datesDiv.querySelectorAll('div'));
@@ -666,7 +637,6 @@ class PaideiaExtractor:
             });
         }
 
-        // Estado de entrega (tabla de Estado de la entrega)
         const tables = Array.from(document.querySelectorAll('table.generaltable'));
         tables.forEach(table => {
             const rows = Array.from(table.querySelectorAll('tr'));
@@ -675,7 +645,6 @@ class PaideiaExtractor:
                 if (cells.length >= 2) {
                     const label = (cells[0].innerText || cells[0].textContent).trim().toLowerCase();
                     const value = (cells[1].innerText || cells[1].textContent).trim();
-                    
                     if (label.includes('estado de la entrega') && !label.includes('calificaci')) {
                         result.estado_entrega = value;
                     } else if (label.includes('calificación') && label.includes('estado de')) {
@@ -685,7 +654,6 @@ class PaideiaExtractor:
             });
         });
 
-        // Calificación (tabla de Comentario / feedback)
         const feedbackTables = Array.from(document.querySelectorAll('div.feedback table.generaltable'));
         feedbackTables.forEach(table => {
             const rows = Array.from(table.querySelectorAll('tr'));
@@ -694,9 +662,7 @@ class PaideiaExtractor:
                 if (cells.length >= 2) {
                     const label = (cells[0].innerText || cells[0].textContent).trim().toLowerCase();
                     const value = (cells[1].innerText || cells[1].textContent).trim();
-                    
                     if (label.includes('calificación') && !label.includes('estado')) {
-                        // Ej: "16,00 / 20,00"
                         result.calificacion = value;
                     } else if (label.includes('calificado sobre')) {
                         result.calificacion_sobre = value;
@@ -707,7 +673,7 @@ class PaideiaExtractor:
 
         return result;
         """
-        
+
         detalles = self.driver.execute_script(script)
         if detalles:
             detalles["url"] = url
@@ -715,13 +681,7 @@ class PaideiaExtractor:
         return detalles or {}
 
     def obtener_lista_cursos(self, query: str | None = None) -> list[dict]:
-        """Recorre los elementos de curso visibles y devuelve lista de dicts {titulo, url}.
-
-        Usa los selectores reales del DOM de Paideia:
-        - tarjeta: div.card.course-card[data-region='course-content']
-        - enlace: a[href*='course/view.php?id=']
-        - título: span.multiline .sr-only o span.multiline[title]
-        """
+        """Recorre los elementos de curso visibles y devuelve lista de dicts {titulo, url}."""
         script = """
         const cards = Array.from(document.querySelectorAll("div.card.course-card[data-region='course-content']"));
         return cards.map(card => {
