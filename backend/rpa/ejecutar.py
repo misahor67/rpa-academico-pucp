@@ -83,6 +83,17 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             calendar_id=nuevo_calendar_id)
         log(sesion_id, f"Completado: {len(eventos_finales)} eventos insertados")
 
+        # ── Guardar en base de datos ──────────────────────────────────────────
+        try:
+            from database import SessionLocal
+            from app import guardar_sincronizacion_en_bd
+            db = SessionLocal()
+            guardar_sincronizacion_en_bd(sesion_id, db)
+            db.close()
+            log(sesion_id, "Historial guardado en base de datos")
+        except Exception as e:
+            log(sesion_id, f"Advertencia: no se pudo guardar en BD: {e}")
+
     except Exception as e:
         actualizar_sesion(sesion_id,
             estado="error",

@@ -38,12 +38,10 @@ class PaideiaExtractor:
         """Abre Paideia y espera a que el usuario haga login manual."""
         self.driver.get("https://paideiacursos.pucp.edu.pe/my/courses.php")
         print("Ingresa tus credenciales en el navegador de Paideia…")
-        print(f"URL actual al abrir: {self.driver.current_url}")  # ← agregar
         deadline = time.time() + 300
         found = False
         while time.time() < deadline:
             try:
-                print(f"Verificando login... URL: {self.driver.current_url}")  # ← agregar
                 if self.driver.find_elements(By.CLASS_NAME, "coursebox"):
                     print("Login detectado en Paideia (coursebox presente).")
                     found = True
@@ -223,7 +221,9 @@ class PaideiaExtractor:
         query = f"{anio}-{ciclo}"
         total = len(cursos)
 
-        for idx, curso in enumerate(cursos):
+        
+        #for idx, curso in enumerate(cursos):
+        for idx, curso in enumerate(cursos[1:2]):    
             url = curso.get("url") or ""
             if not url:
                 continue
