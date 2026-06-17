@@ -82,3 +82,23 @@ export async function confirmarSincronizacion(
     body: JSON.stringify({ nombre_calendario: nombreCalendario }),
   });
 }
+
+export interface HistorialItem {
+  id_semestre: number;
+  nombre: string;
+  anio: number;
+  ciclo: number;
+  fecha_inicio: string;
+  fecha_fin: string;
+  total_actividades: number;
+}
+
+// Obtiene el historial de sincronizaciones
+export async function obtenerHistorial(): Promise<{ historial: HistorialItem[] }> {
+  try {
+    const res = await fetch(`${API_URL}/historial`);
+    return res.json();
+  } catch {
+    return { historial: [] };
+  }
+}

@@ -227,8 +227,9 @@ def obtener_historial(db: Session = Depends(get_db)):
         semestres = db.query(Semestre).order_by(Semestre.anio.desc(), Semestre.ciclo.desc()).all()
         resultado = []
         for s in semestres:
-            total = db.query(ActividadAcademica).join(Curso).filter(
-                Curso.id_semestre == s.id_semestre
+            total = db.query(ActividadAcademica).filter(
+                ActividadAcademica.fecha_inicio >= s.fecha_inicio,
+                ActividadAcademica.fecha_inicio <= s.fecha_fin
             ).count()
             resultado.append({
                 "id_semestre": s.id_semestre,
