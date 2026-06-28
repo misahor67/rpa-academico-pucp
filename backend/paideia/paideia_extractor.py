@@ -255,15 +255,27 @@ class PaideiaExtractor:
                     except Exception:
                         titulo_pagina = ""
 
+                # El título de la página/pestaña trae el formato real
+                # "AÑO-CICLO NOMBRE DEL CURSO (CODIGO-HORARIO)", igual al
+                # código y horario que ya se extraen desde Campus Virtual
+                # (ver campus/campus_cursos_extractor.py). Esto permite
+                # cruzar las actividades de PAIDEIA con el curso real por
+                # código, en lugar de depender únicamente del nombre.
+                codigo_curso_real, horario_curso_real = self._extraer_codigo_horario(titulo_pagina)
+
                 recorridos.append({
                     "course_id": curso.get("course_id", ""),
                     "titulo": curso.get("titulo", ""),
                     "url": url,
                     "titulo_pagina": titulo_pagina,
+                    "codigo_curso_real": codigo_curso_real,
+                    "horario_curso_real": horario_curso_real,
                 })
 
                 try:
-                    resultado_secciones = self.recorrer_secciones_curso(curso)
+                    resultado_secciones = self.recorrer_secciones_curso(
+                        curso, codigo_curso_real, horario_curso_real
+                    )
                     secciones_recorridas = len(resultado_secciones)
                 except Exception as e:
                     print(f"  Advertencia: no se pudieron recorrer las secciones de este curso: {e}")
@@ -298,7 +310,26 @@ class PaideiaExtractor:
         print(f"Cursos recorridos: {len(recorridos)}")
         return recorridos
 
-    def recorrer_secciones_curso(self, curso: dict) -> list[dict]:
+    @staticmethod
+    def _extraer_codigo_horario(titulo_pagina: str) -> tuple[str | None, str | None]:
+        """
+        Extrae el código de curso y el código de horario desde el título
+        de la página de PAIDEIA, con formato:
+            "AÑO-CICLO NOMBRE DEL CURSO (CODIGO-HORARIO)"
+        Ejemplo real: "2026-1 ESTRATEGIA Y GESTIÓN DE SISTEMAS DE
+        INFORMACIÓN (1INF48-1082)" → ("1INF48", "1082")
+        Devuelve (None, None) si el título no tiene el formato esperado.
+        """
+        if not titulo_pagina:
+            return None, None
+        match = re.search(r"\(([A-Z0-9]+)-(\d+)\)\s*$", titulo_pagina.strip())
+        if not match:
+            return None, None
+        return match.group(1), match.group(2)
+
+    def recorrer_secciones_curso(
+        self, curso: dict, codigo_curso_real: str | None = None, horario_curso_real: str | None = None
+    ) -> list[dict]:
         """Recorre cada sección visible de un curso usando la barra lateral izquierda."""
         titulo_curso = curso.get("titulo", "")
         curso_id = curso.get("course_id", "")
@@ -362,6 +393,8 @@ class PaideiaExtractor:
                                 detalles["curso"] = titulo_curso
                                 detalles["course_id"] = curso_id
                                 detalles["seccion"] = titulo
+                                detalles["codigo"] = codigo_curso_real
+                                detalles["horario"] = horario_curso_real
                                 self.entregables_extraidos.append(detalles)
                                 print(
                                     "        "

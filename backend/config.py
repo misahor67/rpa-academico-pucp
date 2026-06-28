@@ -22,3 +22,12 @@ PAIDEIA_CRONOGRAMAS_DIR = Path(__file__).resolve().parent / "cronogramas_paideia
 PAIDEIA_EVENTOS_JSON_DIR = Path(__file__).resolve().parent / "eventos_paideia_json"
 DOWNLOAD_WAIT_SEC = 120
 CALENDAR_ID = "c_c9b60a71fe38b69e40f9357da3d9afd91a76cfa408bcf03db2d00d9c832460f7@group.calendar.google.com"
+
+# ── Estudiante (sistema mono-usuario en esta versión) ─────────────────────────
+# El sistema actual está diseñado para un único estudiante por instalación.
+# Si en el futuro el sistema evoluciona a multiusuario (ver Capítulo 9,
+# "Trabajos futuros", sección 9.2.2), este valor debería reemplazarse por
+# el código del estudiante autenticado en cada sesión.
+ESTUDIANTE_CODIGO_PUCP = "20197102"
+ESTUDIANTE_NOMBRE = "VEGA GRIJALVA, LEONARDO JOSE"
+ESTUDIANTE_CORREO = "a20197102@pucp.edu.pe"

@@ -7,6 +7,7 @@ export interface ConfiguracionSincronizacion {
   anio: number;
   campus: boolean;
   paideia: boolean;
+  recordatorio_minutos: number | null;
 }
 
 export interface EstadoSesion {
@@ -35,6 +36,21 @@ export interface EstadoSesion {
     estado: string;
     eventos: number;
   }>;
+  cambios_detectados?: {
+    nuevas: Array<{
+      nombre: string;
+      curso: string;
+      fuente: string;
+      fecha: string;
+    }>;
+    modificadas: Array<{
+      nombre: string;
+      curso: string;
+      fuente: string;
+      fecha_anterior: string;
+      fecha_nueva: string;
+    }>;
+  };
 }
 
 // Inicia una nueva sincronización

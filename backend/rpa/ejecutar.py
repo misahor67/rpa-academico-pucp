@@ -13,9 +13,11 @@ def ejecutar_rpa(sesion_id: str, config: dict):
     anio = config["anio"]
     extraer_campus = config["campus"]
     extraer_paideia = config["paideia"]
+    recordatorio_minutos = config.get("recordatorio_minutos")
 
     eventos_campus = []
     eventos_paideia = []
+    cursos_campus = []
     pdfs_estado = []
     _driver = None
 
@@ -25,7 +27,7 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             from config import ICS_DIR
             ICS_DIR.mkdir(parents=True, exist_ok=True)
             _driver = create_driver(download_dir=ICS_DIR)
-            eventos_campus = ejecutar_campus(sesion_id, _driver, ciclo, anio)
+            eventos_campus, cursos_campus = ejecutar_campus(sesion_id, _driver, ciclo, anio)
 
         # ── PAIDEIA ───────────────────────────────────────────────────────────
         if extraer_paideia:
@@ -69,7 +71,7 @@ def ejecutar_rpa(sesion_id: str, config: dict):
 
         # ── Google Calendar ───────────────────────────────────────────────────
         eventos_finales, nuevo_calendar_id = ejecutar_calendar(
-            sesion_id, nombre_cal, eventos_campus, eventos_paideia)
+            sesion_id, nombre_cal, eventos_campus, eventos_paideia, recordatorio_minutos)
 
         # ── Completado ────────────────────────────────────────────────────────
         actualizar_sesion(sesion_id,
@@ -77,6 +79,7 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             mensaje="Sincronización completada exitosamente",
             progreso=100,
             eventos=eventos_finales,
+            cursos=cursos_campus,
             total_campus=len(eventos_campus),
             total_paideia=len(eventos_paideia),
             nombre_calendario=nombre_cal,
@@ -88,9 +91,25 @@ def ejecutar_rpa(sesion_id: str, config: dict):
             from database import SessionLocal
             from app import guardar_sincronizacion_en_bd
             db = SessionLocal()
-            guardar_sincronizacion_en_bd(sesion_id, db)
+            resultado_cambios = guardar_sincronizacion_en_bd(sesion_id, db)
             db.close()
             log(sesion_id, "Historial guardado en base de datos")
+
+            # Resumen de cambios detectados respecto a la sincronización
+            # anterior del mismo semestre (R3.1/R3.2): se muestra en la
+            # pantalla de resultado (P10), sin envío de correo ni proceso
+            # en segundo plano, consistente con la arquitectura del sistema.
+            if resultado_cambios:
+                nuevas = resultado_cambios.get("actividades_nuevas", [])
+                modificadas = resultado_cambios.get("actividades_modificadas", [])
+                actualizar_sesion(sesion_id,
+                    cambios_detectados={
+                        "nuevas": nuevas,
+                        "modificadas": modificadas,
+                    })
+                if nuevas or modificadas:
+                    log(sesion_id, f"Cambios detectados: {len(nuevas)} actividad(es) "
+                                   f"nueva(s), {len(modificadas)} modificada(s)")
         except Exception as e:
             log(sesion_id, f"Advertencia: no se pudo guardar en BD: {e}")
 

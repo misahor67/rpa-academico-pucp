@@ -7,10 +7,17 @@ from googleapiclient.discovery import build
 from sesiones import actualizar_sesion, log
 
 
-def ejecutar_calendar(sesion_id: str, nombre_cal: str, eventos_campus: list, eventos_paideia: list) -> list:
+def ejecutar_calendar(
+    sesion_id: str, nombre_cal: str, eventos_campus: list, eventos_paideia: list,
+    recordatorio_minutos: int | None = None,
+) -> list:
     """
     Crea el calendario en Google Calendar (eliminando uno anterior si existe),
     inserta todos los eventos con progreso en tiempo real y retorna los eventos insertados.
+
+    recordatorio_minutos: si se especifica, cada evento se crea con un
+    recordatorio tipo popup ese número de minutos antes de su inicio
+    (delegado a Google Calendar; ver R3.1).
     """
     actualizar_sesion(sesion_id,
         estado="sincronizando",
@@ -49,7 +56,7 @@ def ejecutar_calendar(sesion_id: str, nombre_cal: str, eventos_campus: list, eve
 
     insertados = 0
     for evento in eventos_finales:
-        evento_google = _construir_evento_google(evento)
+        evento_google = _construir_evento_google(evento, recordatorio_minutos)
         if evento_google is None:
             continue
         try:

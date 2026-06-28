@@ -52,10 +52,17 @@ def _normalizar_datetime(valor) -> str:
     return str(valor)
 
 
-def _construir_evento_google(evento: dict) -> dict | None:
+def _construir_evento_google(evento: dict, recordatorio_minutos: int | None = None) -> dict | None:
     """
     Convierte un evento del sistema al formato requerido por Google Calendar API.
     Retorna None si el evento no tiene fechas válidas.
+
+    recordatorio_minutos: si se especifica (y está en el rango permitido
+    por la API, 0 a 40320 minutos = 4 semanas), se agrega un recordatorio
+    tipo popup ese número de minutos antes del inicio del evento. Este es
+    el mecanismo de "recordatorio de proximidad" (R3.1): se delega a
+    Google Calendar, que ya corre de forma permanente, en lugar de que
+    el sistema deba vigilar el reloj por su cuenta.
     """
     inicio = evento.get("inicio")
     fin = evento.get("fin")
@@ -76,7 +83,7 @@ def _construir_evento_google(evento: dict) -> dict | None:
 
     titulo = f"[{fuente}] {tipo} - {curso}" if tipo else f"[{fuente}] {curso}"
 
-    return {
+    evento_google = {
         "summary": titulo,
         "location": ubicacion,
         "description": f"Fuente: {fuente}\n{descripcion}".strip(),
@@ -90,8 +97,21 @@ def _construir_evento_google(evento: dict) -> dict | None:
         },
     }
 
+    if recordatorio_minutos is not None and 0 <= recordatorio_minutos <= 40320:
+        evento_google["reminders"] = {
+            "useDefault": False,
+            "overrides": [
+                {"method": "popup", "minutes": recordatorio_minutos},
+            ],
+        }
 
-def insertar_eventos(creds: Credentials, eventos: list[dict], calendar_id: str = "primary") -> dict:
+    return evento_google
+
+
+def insertar_eventos(
+    creds: Credentials, eventos: list[dict], calendar_id: str = "primary",
+    recordatorio_minutos: int | None = None,
+) -> dict:
     """
     Inserta la lista de eventos en Google Calendar.
     Retorna un resumen con la cantidad de eventos insertados y fallidos.
@@ -104,7 +124,7 @@ def insertar_eventos(creds: Credentials, eventos: list[dict], calendar_id: str =
     print(f"\nInsertando {len(eventos)} eventos en Google Calendar...")
 
     for evento in eventos:
-        evento_google = _construir_evento_google(evento)
+        evento_google = _construir_evento_google(evento, recordatorio_minutos)
 
         if evento_google is None:
             print(f"  Omitido (sin fechas): {evento.get('curso') or evento.get('titulo', 'Sin título')}")

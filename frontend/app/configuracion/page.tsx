@@ -11,11 +11,19 @@ const CICLOS = [
   { id: 2, nombre: "Regular 2", meses: "Ago · Sep · Oct · Nov · Dic" },
 ];
 
+const OPCIONES_RECORDATORIO = [
+  { id: "ninguno", minutos: null, label: "Sin recordatorio" },
+  { id: "30min", minutos: 30, label: "30 minutos antes" },
+  { id: "1h", minutos: 60, label: "1 hora antes" },
+  { id: "1d", minutos: 1440, label: "1 día antes" },
+];
+
 export default function Configuracion() {
   const router = useRouter();
   const [cicloSeleccionado, setCicloSeleccionado] = useState<number | null>(null);
   const [anio, setAnio] = useState(new Date().getFullYear());
   const [fuente, setFuente] = useState<string | null>(null);
+  const [recordatorioId, setRecordatorioId] = useState<string>("ninguno");
   const [cargando, setCargando] = useState(false);
 
   const formCompleto = cicloSeleccionado !== null && fuente !== null;
@@ -24,11 +32,13 @@ export default function Configuracion() {
     if (!formCompleto) return;
     setCargando(true);
     try {
+      const recordatorioSeleccionado = OPCIONES_RECORDATORIO.find((o) => o.id === recordatorioId);
       const config = {
         ciclo: cicloSeleccionado!,
         anio,
         campus: fuente === "campus" || fuente === "ambas",
         paideia: fuente === "paideia" || fuente === "ambas",
+        recordatorio_minutos: recordatorioSeleccionado?.minutos ?? null,
       };
       const respuesta = await iniciarSincronizacion(config);
       // Navegar a la pantalla de login con el ID de sesión
@@ -128,6 +138,31 @@ export default function Configuracion() {
                   <p className="text-sm font-medium text-[#111827]">{op.label}</p>
                   <p className="text-xs text-[#6B7280]">{op.desc}</p>
                 </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Sección 4 — Recordatorio */}
+        <section className="flex flex-col gap-3">
+          <label className="font-semibold text-sm text-[#111827]">
+            Recordatorio en Google Calendar
+          </label>
+          <p className="text-xs text-[#6B7280]">
+            Cada actividad sincronizada incluirá una notificación popup en Google Calendar con la anticipación que elijas.
+          </p>
+          <div className="flex gap-3 flex-wrap">
+            {OPCIONES_RECORDATORIO.map((op) => (
+              <button
+                key={op.id}
+                onClick={() => setRecordatorioId(op.id)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
+                  recordatorioId === op.id
+                    ? "border-[#2563EB] bg-[#EFF6FF] text-[#2563EB]"
+                    : "border-[#D1D5DB] bg-white text-[#111827]"
+                }`}
+              >
+                {op.label}
               </button>
             ))}
           </div>

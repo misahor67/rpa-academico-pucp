@@ -3,7 +3,10 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { obtenerEventos, obtenerEstado } from "@/lib/api";
+import { obtenerEventos, obtenerEstado, type EstadoSesion } from "@/lib/api";
+
+type CambioNuevo = NonNullable<EstadoSesion["cambios_detectados"]>["nuevas"][number];
+type CambioModificado = NonNullable<EstadoSesion["cambios_detectados"]>["modificadas"][number];
 
 function ResultadoPage() {
   const router = useRouter();
@@ -17,9 +20,25 @@ function ResultadoPage() {
   const [nombreCalendario, setNombreCalendario] = useState("RPA Académico PUCP");
   const [fechaHora, setFechaHora] = useState("");
   const [estado, setEstado] = useState("completado");
+  const [cambiosNuevas, setCambiosNuevas] = useState<CambioNuevo[]>([]);
+  const [cambiosModificadas, setCambiosModificadas] = useState<CambioModificado[]>([]);
 
   const CICLOS: Record<number, string> = {
     0: "Verano", 1: "Regular 1", 2: "Regular 2"
+  };
+
+  const formatearFechaHora = (iso: string) => {
+    try {
+      const fecha = new Date(iso);
+      return fecha.toLocaleString("es-PE", {
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
   };
 
   useEffect(() => {
@@ -35,6 +54,10 @@ function ResultadoPage() {
       if (data.nombre_calendario) setNombreCalendario(data.nombre_calendario);
       if (data.config) {
         setCiclo(`${CICLOS[data.config.ciclo]} · ${data.config.anio}`);
+      }
+      if (data.cambios_detectados) {
+        setCambiosNuevas(data.cambios_detectados.nuevas || []);
+        setCambiosModificadas(data.cambios_detectados.modificadas || []);
       }
     });
   }, [sesionId]);
@@ -106,6 +129,61 @@ function ResultadoPage() {
                 <p className="font-semibold text-[#111827]">{fechaHora}</p>
               </div>
             </div>
+            {/* Cambios detectados respecto a la sincronización anterior */}
+            {(cambiosNuevas.length > 0 || cambiosModificadas.length > 0) && (
+              <div className="w-full bg-[#FFFBEB] border border-[#FDE68A] rounded-xl p-5">
+                <p className="font-semibold text-sm text-[#92400E] mb-3">
+                  Cambios detectados respecto a tu última sincronización
+                </p>
+                <div className="flex flex-col gap-4">
+                  {cambiosNuevas.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-[#92400E] mb-2">
+                        {cambiosNuevas.length} actividad{cambiosNuevas.length > 1 ? "es" : ""} nueva{cambiosNuevas.length > 1 ? "s" : ""}
+                      </p>
+                      <div className="flex flex-col gap-2">
+                        {cambiosNuevas.slice(0, 5).map((c, i) => (
+                          <div key={i} className="bg-white border border-[#FDE68A] rounded-lg px-3 py-2">
+                            <p className="text-sm font-medium text-[#111827]">{c.nombre}</p>
+                            <p className="text-xs text-[#6B7280] mt-0.5">
+                              {c.curso} · {c.fuente} · {formatearFechaHora(c.fecha)}
+                            </p>
+                          </div>
+                        ))}
+                        {cambiosNuevas.length > 5 && (
+                          <p className="text-xs text-[#92400E]">y {cambiosNuevas.length - 5} más...</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {cambiosModificadas.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-[#92400E] mb-2">
+                        {cambiosModificadas.length} actividad{cambiosModificadas.length > 1 ? "es" : ""} con fecha modificada
+                      </p>
+                      <div className="flex flex-col gap-2">
+                        {cambiosModificadas.slice(0, 5).map((c, i) => (
+                          <div key={i} className="bg-white border border-[#FDE68A] rounded-lg px-3 py-2">
+                            <p className="text-sm font-medium text-[#111827]">{c.nombre}</p>
+                            <p className="text-xs text-[#6B7280] mt-0.5">
+                              {c.curso} · {c.fuente}
+                            </p>
+                            <p className="text-xs text-[#6B7280] mt-1">
+                              <span className="line-through">{formatearFechaHora(c.fecha_anterior)}</span>
+                              {" → "}
+                              <span className="font-medium text-[#92400E]">{formatearFechaHora(c.fecha_nueva)}</span>
+                            </p>
+                          </div>
+                        ))}
+                        {cambiosModificadas.length > 5 && (
+                          <p className="text-xs text-[#92400E]">y {cambiosModificadas.length - 5} más...</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
 

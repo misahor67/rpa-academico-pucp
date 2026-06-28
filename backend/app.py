@@ -9,14 +9,17 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from sesiones import sesiones, actualizar_sesion, log
 from rpa.ejecutar import ejecutar_rpa
 from database import get_db, engine
-from models import Base, Semestre, ActividadAcademica, Estudiante, Curso, FuenteActividad, TipoActividad, EstadoSemestre
+from models import (
+    Base, Semestre, ActividadAcademica, Estudiante, Curso, Profesor,
+    CursoProfesor, FuenteActividad, TipoActividad, EstadoSemestre,
+)
+from config import ESTUDIANTE_CODIGO_PUCP, ESTUDIANTE_NOMBRE, ESTUDIANTE_CORREO
 
 # Crear tablas si no existen
 Base.metadata.create_all(bind=engine)
@@ -41,6 +44,7 @@ class ConfiguracionSincronizacion(BaseModel):
     anio: int
     campus: bool
     paideia: bool
+    recordatorio_minutos: int | None = None  # minutos antes del evento para el recordatorio (popup) en Google Calendar; None = sin recordatorio personalizado
 
 
 class ConfirmacionBody(BaseModel):
@@ -49,8 +53,159 @@ class ConfirmacionBody(BaseModel):
 
 # ── Helpers BD ────────────────────────────────────────────────────────────────
 
+def _normalizar_nombre_curso(nombre: str) -> str:
+    """Normaliza un nombre de curso para poder compararlo entre Campus
+    Virtual y PAIDEIA (mayúsculas, sin espacios extra ni tildes)."""
+    import unicodedata
+    if not nombre:
+        return ""
+    nombre = nombre.strip().upper()
+    nombre = unicodedata.normalize("NFKD", nombre)
+    nombre = "".join(c for c in nombre if not unicodedata.combining(c))
+    nombre = " ".join(nombre.split())  # colapsa espacios múltiples
+    return nombre
+
+
+def _obtener_o_crear_estudiante(db: Session) -> Estudiante:
+    """Sistema mono-usuario: siempre el mismo estudiante, configurado
+    en config.py. Ver Capítulo 9, sección 9.2.2, sobre la evolución
+    futura hacia un sistema multiusuario."""
+    estudiante = db.query(Estudiante).filter_by(
+        codigo_pucp=ESTUDIANTE_CODIGO_PUCP
+    ).first()
+    if not estudiante:
+        estudiante = Estudiante(
+            codigo_pucp=ESTUDIANTE_CODIGO_PUCP,
+            nombre=ESTUDIANTE_NOMBRE,
+            correo=ESTUDIANTE_CORREO,
+        )
+        db.add(estudiante)
+        db.flush()
+    return estudiante
+
+
+def _obtener_o_crear_profesor(db: Session, datos_docente: dict) -> Profesor | None:
+    """Busca o crea un Profesor a partir de los datos extraídos
+    (nombre, codigo_pucp, email). Devuelve None si no hay código
+    (no se puede identificar de forma única)."""
+    codigo = datos_docente.get("codigo_pucp")
+    if not codigo:
+        return None
+
+    profesor = db.query(Profesor).filter_by(codigo_pucp=codigo).first()
+    if not profesor:
+        profesor = Profesor(
+            codigo_pucp=codigo,
+            nombre=datos_docente.get("nombre") or "Sin nombre",
+            email=datos_docente.get("email"),
+        )
+        db.add(profesor)
+        db.flush()
+    return profesor
+
+
+def _crear_indice_cursos(db: Session, cursos_extraidos: list[dict], semestre: Semestre) -> dict:
+    """
+    Crea (o reutiliza) en BD cada curso de cursos_extraidos, asociando
+    sus docentes vía CursoProfesor. Devuelve un índice para resolver
+    rápidamente el id_curso de cada actividad académica:
+        {
+            "por_codigo": {codigo_curso: id_curso},
+            "por_nombre": {nombre_normalizado: id_curso},
+        }
+    """
+    indice = {"por_codigo": {}, "por_nombre": {}}
+
+    for c in cursos_extraidos:
+        codigo = c.get("codigo")
+        nombre = c.get("nombre") or "Curso sin nombre"
+        if not codigo:
+            continue
+
+        curso = db.query(Curso).filter_by(
+            codigo=codigo, id_semestre=semestre.id_semestre
+        ).first()
+        if not curso:
+            creditos = None
+            try:
+                creditos = float(c.get("creditos")) if c.get("creditos") else None
+            except (TypeError, ValueError):
+                creditos = None
+
+            curso = Curso(
+                codigo=codigo,
+                nombre=nombre[:150],
+                creditos=creditos,
+                horario=c.get("horario"),
+                id_semestre=semestre.id_semestre,
+            )
+            db.add(curso)
+            db.flush()
+
+        # Asociar docente(s), evitando duplicados en curso_profesor
+        for docente in c.get("docentes", []):
+            profesor = _obtener_o_crear_profesor(db, docente)
+            if not profesor:
+                continue
+            existe = db.query(CursoProfesor).filter_by(
+                id_curso=curso.id_curso, id_profesor=profesor.id_profesor
+            ).first()
+            if not existe:
+                db.add(CursoProfesor(id_curso=curso.id_curso, id_profesor=profesor.id_profesor))
+
+        indice["por_codigo"][codigo] = curso.id_curso
+        indice["por_nombre"][_normalizar_nombre_curso(nombre)] = curso.id_curso
+
+    db.flush()
+    return indice
+
+
+def _resolver_id_curso(ev: dict, indice: dict, curso_generico_id: int) -> int:
+    """
+    Resuelve el id_curso real de un evento, probando primero por código
+    de curso. Tanto los eventos de Campus Virtual (vía SUMMARY del .ics)
+    como los de PAIDEIA (vía el título de la página del curso, formato
+    "AÑO-CICLO NOMBRE (CODIGO-HORARIO)") ya traen el código real de
+    curso en ev["codigo"]. El cruce por nombre normalizado se mantiene
+    solo como respaldo, para el caso en que el código no esté disponible.
+    Si no hay coincidencia alguna, devuelve el curso genérico de respaldo.
+    """
+    codigo_ev = ev.get("codigo")
+    if codigo_ev and codigo_ev in indice["por_codigo"]:
+        return indice["por_codigo"][codigo_ev]
+
+    nombre_ev = ev.get("curso") or ev.get("titulo") or ev.get("nombre") or ""
+    nombre_norm = _normalizar_nombre_curso(nombre_ev)
+    if nombre_norm and nombre_norm in indice["por_nombre"]:
+        return indice["por_nombre"][nombre_norm]
+
+    return curso_generico_id
+
+
+def _obtener_o_crear_curso_generico(db: Session, semestre: Semestre) -> Curso:
+    """
+    Curso de respaldo para actividades que no se pudieron asociar a
+    ningún curso real extraído (p. ej. si la extracción de cursos falló
+    o el nombre no coincide con ningún curso conocido). Mantiene la
+    integridad referencial sin recurrir a relajar las foreign keys.
+    """
+    curso = db.query(Curso).filter_by(
+        codigo="SIN_CURSO", id_semestre=semestre.id_semestre
+    ).first()
+    if not curso:
+        curso = Curso(
+            codigo="SIN_CURSO",
+            nombre="Actividad sin curso identificado",
+            id_semestre=semestre.id_semestre,
+        )
+        db.add(curso)
+        db.flush()
+    return curso
+
+
 def guardar_sincronizacion_en_bd(sesion_id: str, db: Session):
-    """Guarda el resultado de la sincronización en la base de datos."""
+    """Guarda el resultado de la sincronización en la base de datos,
+    asociando cada actividad a su curso, docente(s) y estudiante reales."""
     sesion = sesiones.get(sesion_id)
     if not sesion:
         return
@@ -59,10 +214,9 @@ def guardar_sincronizacion_en_bd(sesion_id: str, db: Session):
     ciclo = config.get("ciclo", 0)
     anio = config.get("anio", datetime.now().year)
     eventos = sesion.get("eventos", [])
+    cursos_extraidos = sesion.get("cursos", [])
 
     try:
-        db.execute(text("SET FOREIGN_KEY_CHECKS=0"))  # ← agregar
-
         # 1. Buscar o crear semestre
         semestre = db.query(Semestre).filter_by(ciclo=ciclo, anio=anio).first()
         if not semestre:
@@ -78,7 +232,63 @@ def guardar_sincronizacion_en_bd(sesion_id: str, db: Session):
             db.add(semestre)
             db.flush()
 
-        # 2. Guardar cada evento como actividad_academica
+        # 2. Estudiante (único, mono-usuario)
+        estudiante = _obtener_o_crear_estudiante(db)
+
+        # 3. Cursos reales + docentes, a partir de lo extraído de Campus Virtual
+        indice_cursos = _crear_indice_cursos(db, cursos_extraidos, semestre)
+        curso_generico = _obtener_o_crear_curso_generico(db, semestre)
+
+        # Diccionario id_curso -> nombre de curso, para enriquecer el
+        # reporte de cambios detectados (R3.1) con el curso al que
+        # pertenece cada actividad nueva o modificada.
+        nombres_curso_por_id: dict[int, str] = {
+            row.id_curso: row.nombre
+            for row in db.query(Curso.id_curso, Curso.nombre).filter_by(
+                id_semestre=semestre.id_semestre
+            ).all()
+        }
+
+        # 3.5. Capturar snapshot de las actividades de una sincronización
+        # anterior del MISMO semestre (antes de borrarlas), para poder
+        # comparar después qué actividades son nuevas o cambiaron de
+        # fecha respecto a esta sincronización (ver R3.1: detección de
+        # cambios). La clave de comparación es el identificador estable
+        # de cada actividad (uid del .ics de Campus Virtual, o url de la
+        # tarea en PAIDEIA) — NO el nombre del curso, ya que varias
+        # actividades distintas de un mismo curso comparten ese nombre.
+        # Si una actividad no trae identificador estable, se usa
+        # (id_curso, nombre, fecha_inicio original) como respaldo, a
+        # costa de no poder detectar cambios de fecha para ese caso.
+        ids_curso_semestre = [
+            row.id_curso for row in db.query(Curso.id_curso).filter_by(
+                id_semestre=semestre.id_semestre
+            ).all()
+        ]
+        actividades_anteriores: dict[str, datetime] = {}
+        if ids_curso_semestre:
+            previas = db.query(ActividadAcademica).filter(
+                ActividadAcademica.id_estudiante == estudiante.id_estudiante,
+                ActividadAcademica.id_curso.in_(ids_curso_semestre),
+            ).all()
+            for p in previas:
+                clave_previa = p.url_origen or f"{p.id_curso}|{p.nombre}|{p.fecha_inicio.isoformat()}"
+                actividades_anteriores[clave_previa] = p.fecha_inicio
+
+            eliminadas = db.query(ActividadAcademica).filter(
+                ActividadAcademica.id_estudiante == estudiante.id_estudiante,
+                ActividadAcademica.id_curso.in_(ids_curso_semestre),
+            ).delete(synchronize_session=False)
+            if eliminadas:
+                print(f"BD: {eliminadas} actividades de una sincronización "
+                      f"anterior de este semestre fueron reemplazadas.")
+
+        # 4. Guardar cada evento como actividad_academica, detectando en
+        # el proceso si es una actividad nueva o si cambió de fecha
+        # respecto a la sincronización anterior.
+        actividades_nuevas: list[dict] = []
+        actividades_modificadas: list[dict] = []
+
         for ev in eventos:
             nombre = ev.get("curso") or ev.get("summary") or ev.get("titulo") or ev.get("nombre") or "Sin nombre"
             fecha_inicio = ev.get("inicio") or ev.get("dtstart") or ev.get("fecha_inicio")
@@ -117,25 +327,53 @@ def guardar_sincronizacion_en_bd(sesion_id: str, db: Session):
             else:
                 tipo = "Clase"
 
+            id_curso = _resolver_id_curso(ev, indice_cursos, curso_generico.id_curso)
+            nombre_guardado = nombre[:255]
+            nombre_curso = nombres_curso_por_id.get(id_curso, "Curso sin identificar")
+
+            # Detección de cambios respecto a la sincronización anterior (R3.1)
+            clave = url_origen or f"{id_curso}|{nombre_guardado}|{fecha_inicio.isoformat()}"
+            fecha_anterior = actividades_anteriores.get(clave)
+            if fecha_anterior is None:
+                actividades_nuevas.append({
+                    "nombre": nombre_guardado,
+                    "curso": nombre_curso,
+                    "fuente": fuente,
+                    "fecha": fecha_inicio.isoformat(),
+                })
+            elif fecha_anterior != fecha_inicio:
+                actividades_modificadas.append({
+                    "nombre": nombre_guardado,
+                    "curso": nombre_curso,
+                    "fuente": fuente,
+                    "fecha_anterior": fecha_anterior.isoformat(),
+                    "fecha_nueva": fecha_inicio.isoformat(),
+                })
+
             actividad = ActividadAcademica(
-                nombre=nombre[:255],
+                nombre=nombre_guardado,
                 tipo=tipo,
                 fecha_inicio=fecha_inicio,
                 fecha_fin=fecha_fin or fecha_inicio,
                 fuente=fuente,
                 url_origen=str(url_origen)[:500] if url_origen else None,
-                id_curso=1,       # placeholder — se mejora cuando se conecte curso real
-                id_estudiante=1,  # placeholder — se mejora cuando se conecte estudiante real
+                id_curso=id_curso,
+                id_estudiante=estudiante.id_estudiante,
             )
             db.add(actividad)
 
         db.commit()
-        db.execute(text("SET FOREIGN_KEY_CHECKS=1"))
         print(f"BD: {len(eventos)} actividades guardadas para ciclo {ciclo}/{anio}")
+
+        return {
+            "actividades_nuevas": actividades_nuevas,
+            "actividades_modificadas": actividades_modificadas,
+        }
 
     except Exception as e:
         db.rollback()
         print(f"Error guardando en BD: {e}")
+        return {"actividades_nuevas": [], "actividades_modificadas": []}
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

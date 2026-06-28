@@ -187,8 +187,9 @@ class CampusCalendarioIcs:
 
     def descargar_ics_ciclo(self, ciclo: int, anio: int, callback=None) -> list[Path]:
         """
-        Descarga un .ics por cada mes del ciclo indicado.
-        Omite meses que ya tienen archivo en disco.
+        Descarga un .ics por cada mes del ciclo indicado, siempre
+        solicitando una versión actualizada a Campus Virtual (no se
+        reutilizan archivos de sincronizaciones anteriores).
         Devuelve la lista de rutas guardadas.
         Si se pasa callback(mes, destino), se llama después de cada mes.
         """
@@ -205,13 +206,12 @@ class CampusCalendarioIcs:
 
             print(f"\n--- {NOMBRES_MESES[mes]} {anio} ---")
 
-            # Saltar si ya existe y no está vacío
-            if destino.exists() and destino.stat().st_size > 0:
-                print(f"  Ya existe: {destino.name}")
-                guardados.append(destino)
-                if callback:
-                    callback(mes, destino)
-                continue
+            # Siempre se vuelve a descargar el .ics de cada mes, aunque ya
+            # exista uno en disco de una sincronización anterior. El archivo
+            # .ics es solo un artefacto de transporte, no una fuente de
+            # verdad a preservar: cachearlo impedía detectar actividades
+            # nuevas o modificadas agregadas a Campus Virtual después de
+            # la primera descarga (ver R3.1, detección de cambios).
 
             self._handle_alert()
             self.navegar_a_mes(mes, anio)
@@ -347,4 +347,3 @@ class CampusCalendarioIcs:
                     todos.append(ev)
 
         return todos
-
